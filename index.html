@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFTix - Blockchain Ticketing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #0f172a; color: white; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .accent-gradient { background: linear-gradient(135deg, #8b5cf6 0%, #06b6d4 100%); }
+        /* Prevent layout shift when modals open */
+        body.modal-open { overflow: hidden; }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Navigation -->
+    <nav class="p-6 border-b border-white/10 flex justify-between items-center">
+        <h1 class="text-2xl font-bold tracking-tighter text-transparent bg-clip-text accent-gradient">NFTix.io</h1>
+        <div id="roleIndicator" class="text-sm font-mono px-3 py-1 rounded-full glass border-cyan-500/50 text-cyan-400">
+            Role: Guest
+        </div>
+    </nav>
+
+    <!-- Role Selection -->
+    <div id="roleView" class="max-w-4xl mx-auto mt-20 p-6">
+        <h2 class="text-4xl font-bold mb-8 text-center">Choose Your Identity</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <button onclick="setRole('ORGANIZER')" class="glass p-8 rounded-2xl hover:bg-white/10 transition group text-left">
+                <div class="w-12 h-12 rounded-lg accent-gradient mb-4 flex items-center justify-center">🏛️</div>
+                <h3 class="text-xl font-bold mb-2">Event Organizer</h3>
+                <p class="text-gray-400 text-sm">Create events, mint NFT tickets, and manage distribution.</p>
+            </button>
+            <button onclick="setRole('HOLDER')" class="glass p-8 rounded-2xl hover:bg-white/10 transition group text-left">
+                <div class="w-12 h-12 rounded-lg accent-gradient mb-4 flex items-center justify-center">🎫</div>
+                <h3 class="text-xl font-bold mb-2">Ticket Holder</h3>
+                <p class="text-gray-400 text-sm">View your collection, transfer tickets, and show QR for entry.</p>
+            </button>
+            <button onclick="setRole('VERIFIER')" class="glass p-8 rounded-2xl hover:bg-white/10 transition group text-left">
+                <div class="w-12 h-12 rounded-lg accent-gradient mb-4 flex items-center justify-center">🔍</div>
+                <h3 class="text-xl font-bold mb-2">Gate Verifier</h3>
+                <p class="text-gray-400 text-sm">Scan and validate tickets at the event entrance.</p>
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="hidden max-w-6xl mx-auto p-6 space-y-8">
+        <button onclick="resetRole()" class="text-gray-400 hover:text-white transition">← Change Identity</button>
+        
+        <!-- Organizer View -->
+        <div id="organizerDashboard" class="hidden space-y-6">
+            <div class="flex justify-between items-center">
+                <h2 class="text-3xl font-bold">Organizer Dashboard</h2>
+                <button onclick="showModal('createEventModal')" class="accent-gradient px-6 py-2 rounded-lg font-bold">Create Event</button>
+            </div>
+            <div id="eventList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Events populated here -->
+            </div>
+        </div>
+
+        <!-- Holder View -->
+        <div id="holderDashboard" class="hidden space-y-6">
+            <h2 class="text-3xl font-bold">My Digital Wallet</h2>
+            <div class="glass p-4 rounded-xl flex gap-4 items-center mb-8">
+                <input id="walletAddr" type="text" value="0xUser_123" class="bg-black/20 border border-white/10 p-2 rounded flex-1" placeholder="Enter Wallet Address">
+                <button onclick="loadMyTickets()" class="bg-white/10 px-4 py-2 rounded">Refresh Ledger</button>
+            </div>
+            <div id="myTickets" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- User tickets here -->
+            </div>
+        </div>
+
+        <!-- Verifier View -->
+        <div id="verifierDashboard" class="hidden space-y-6 max-w-xl mx-auto">
+            <h2 class="text-3xl font-bold text-center">Gate Access Verification</h2>
+            <div class="glass p-8 rounded-3xl text-center space-y-4">
+                <p class="text-gray-400">Scan QR Code or paste Token ID manually</p>
+                <input id="verifyInput" type="text" class="w-full bg-black/40 border border-white/10 p-4 rounded-xl text-center font-mono" placeholder="NFT-XXXX-XXXX">
+                <button onclick="handleVerifyTicket()" class="w-full accent-gradient py-4 rounded-xl font-bold text-lg">VERIFY AUTHENTICITY</button>
+                <div id="verifyResult" class="hidden p-4 rounded-xl font-bold text-xl"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="createEventModal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+        <div class="glass p-8 rounded-3xl w-full max-w-md space-y-4">
+            <h3 class="text-2xl font-bold">New Event</h3>
+            <input id="evName" type="text" placeholder="Event Name" class="w-full bg-white/5 border border-white/10 p-3 rounded">
+            <input id="evDate" type="date" class="w-full bg-white/5 border border-white/10 p-3 rounded">
+            <input id="evVenue" type="text" placeholder="Venue" class="w-full bg-white/5 border border-white/10 p-3 rounded">
+            <input id="evCapacity" type="number" placeholder="Capacity" class="w-full bg-white/5 border border-white/10 p-3 rounded">
+            <div class="flex gap-2">
+                <!-- Renamed function to avoid document.createEvent conflict -->
+                <button onclick="handleCreateEvent()" class="accent-gradient flex-1 py-3 rounded-xl font-bold">Create</button>
+                <button onclick="closeModal('createEventModal')" class="bg-white/10 px-4 py-3 rounded-xl">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ticketModal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+        <div class="glass p-8 rounded-3xl w-full max-w-sm text-center space-y-6">
+            <h3 id="modalTicketTitle" class="text-2xl font-bold"></h3>
+            <div id="qrContainer" class="bg-white p-4 rounded-2xl inline-block mx-auto">
+                <img id="qrImage" src="" alt="QR" class="w-48 h-48">
+            </div>
+            <div class="space-y-2">
+                <p id="modalTokenId" class="text-xs font-mono text-gray-400"></p>
+                <button onclick="showTransferForm()" class="w-full bg-white/10 py-2 rounded">Transfer NFT</button>
+                <div id="transferForm" class="hidden space-y-2 mt-4">
+                    <input id="transferTo" type="text" placeholder="Recipient Address" class="w-full bg-black/40 p-2 rounded text-sm">
+                    <button id="confirmTransferBtn" class="w-full accent-gradient py-2 rounded text-sm font-bold">Confirm Transfer</button>
+                </div>
+            </div>
+            <button onclick="closeModal('ticketModal')" class="text-gray-400 hover:text-white">Close</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8000";
+        let currentRole = "GUEST";
+        let activeTokenId = null;
+
+        function setRole(role) {
+            currentRole = role;
+            document.getElementById('roleIndicator').innerText = `Role: ${role}`;
+            document.getElementById('roleView').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            
+            // Toggle Dashboard Subsections
+            document.getElementById('organizerDashboard').classList.toggle('hidden', role !== 'ORGANIZER');
+            document.getElementById('holderDashboard').classList.toggle('hidden', role !== 'HOLDER');
+            document.getElementById('verifierDashboard').classList.toggle('hidden', role !== 'VERIFIER');
+
+            if (role === 'ORGANIZER') loadEvents();
+            if (role === 'HOLDER') loadMyTickets();
+        }
+
+        function resetRole() {
+            document.getElementById('roleView').classList.remove('hidden');
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('verifyResult').classList.add('hidden');
+        }
+
+        function showModal(id) { 
+            document.getElementById(id).classList.remove('hidden'); 
+            document.body.classList.add('modal-open');
+        }
+
+        function closeModal(id) { 
+            document.getElementById(id).classList.add('hidden'); 
+            document.body.classList.remove('modal-open');
+        }
+
+        async function api(path, method = 'GET', body = null) {
+            const headers = { 
+                'X-Role': currentRole,
+                'Content-Type': 'application/json'
+            };
+            const config = { method, headers };
+            if (body) config.body = JSON.stringify(body);
+            
+            try {
+                const res = await fetch(`${API_URL}${path}`, config);
+                if (!res.ok) {
+                    const error = await res.json();
+                    throw new Error(error.detail || "API Error");
+                }
+                return await res.json();
+            } catch (err) {
+                console.error(err);
+                alert(err.message);
+                return null;
+            }
+        }
+
+        async function handleCreateEvent() {
+            const name = document.getElementById('evName').value;
+            const date = document.getElementById('evDate').value;
+            const venue = document.getElementById('evVenue').value;
+            const cap = document.getElementById('evCapacity').value;
+
+            if(!name || !date || !venue || !cap) {
+                alert("Please fill all fields");
+                return;
+            }
+
+            const data = {
+                name: name,
+                date: date,
+                venue: venue,
+                capacity: parseInt(cap)
+            };
+            
+            const result = await api('/events', 'POST', data);
+            if(result) {
+                closeModal('createEventModal');
+                loadEvents();
+            }
+        }
+
+        async function loadEvents() {
+            const events = await api('/events');
+            if(!events) return;
+
+            const container = document.getElementById('eventList');
+            container.innerHTML = events.map(ev => `
+                <div class="glass p-6 rounded-2xl flex justify-between items-center animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div>
+                        <h4 class="text-xl font-bold">${ev.name}</h4>
+                        <p class="text-sm text-gray-400">${ev.date} @ ${ev.venue}</p>
+                    </div>
+                    <button onclick="mintTickets('${ev.id}')" class="bg-cyan-500/20 text-cyan-400 px-4 py-2 rounded-lg border border-cyan-500/30 hover:bg-cyan-500/40 transition">Mint 5 Tickets</button>
+                </div>
+            `).join('');
+            
+            if(events.length === 0) {
+                container.innerHTML = '<p class="col-span-2 text-center text-gray-500 py-10">No events created yet.</p>';
+            }
+        }
+
+        async function mintTickets(eventId) {
+            const addr = prompt("Enter initial owner wallet address:", "0xUser_123");
+            if (!addr) return;
+            const res = await api(`/events/${eventId}/mint?count=5&owner=${addr}`, 'POST');
+            if(res) alert("5 NFT Tickets successfully minted to blockchain ledger.");
+        }
+
+        async function loadMyTickets() {
+            const addr = document.getElementById('walletAddr').value;
+            const tickets = await api(`/tickets/my?address=${addr}`);
+            if(!tickets) return;
+
+            const container = document.getElementById('myTickets');
+            container.innerHTML = tickets.map(t => `
+                <div onclick="openTicket('${t.token_id}', '${t.event_name}')" class="glass p-6 rounded-2xl cursor-pointer hover:scale-105 transition border-l-4 ${t.is_used ? 'border-red-500' : 'border-green-500'}">
+                    <div class="text-xs text-cyan-400 font-bold mb-1">NFT TICKET</div>
+                    <h4 class="text-lg font-bold truncate">${t.event_name}</h4>
+                    <p class="text-xs font-mono text-gray-500 mt-2">${t.token_id}</p>
+                    ${t.is_used ? '<span class="text-[10px] bg-red-500/20 text-red-500 px-2 py-1 rounded mt-2 inline-block">USED</span>' : ''}
+                </div>
+            `).join('') || '<p class="col-span-3 text-center text-gray-500 py-10">No tickets found in this wallet.</p>';
+        }
+
+        async function openTicket(tokenId, eventName) {
+            activeTokenId = tokenId;
+            document.getElementById('modalTicketTitle').innerText = eventName;
+            document.getElementById('modalTokenId').innerText = tokenId;
+            document.getElementById('transferForm').classList.add('hidden');
+            
+            const data = await api(`/tickets/${tokenId}/qr`);
+            if(data) {
+                document.getElementById('qrImage').src = data.qr_code;
+                showModal('ticketModal');
+
+                document.getElementById('confirmTransferBtn').onclick = async () => {
+                    const to = document.getElementById('transferTo').value;
+                    const from = document.getElementById('walletAddr').value;
+                    if(!to) return alert("Enter recipient address");
+                    const res = await api(`/tickets/${tokenId}/transfer?current_user_address=${from}`, 'POST', { to_address: to });
+                    if(res) {
+                        closeModal('ticketModal');
+                        loadMyTickets();
+                    }
+                };
+            }
+        }
+
+        function showTransferForm() {
+            document.getElementById('transferForm').classList.toggle('hidden');
+        }
+
+        async function handleVerifyTicket() {
+            const payload = document.getElementById('verifyInput').value;
+            if(!payload) return alert("Please enter a Token ID");
+            
+            const res = await api('/verify', 'POST', { qr_payload: payload });
+            const resultDiv = document.getElementById('verifyResult');
+            resultDiv.classList.remove('hidden', 'bg-green-500/20', 'bg-red-500/20', 'text-green-500', 'text-red-500');
+            
+            if (res && res.valid) {
+                resultDiv.innerText = "✓ VALID TICKET - ACCESS GRANTED";
+                resultDiv.classList.add('bg-green-500/20', 'text-green-500');
+            } else {
+                resultDiv.innerText = `✗ INVALID: ${res ? res.reason : 'Verification Failed'}`;
+                resultDiv.classList.add('bg-red-500/20', 'text-red-500');
+            }
+        }
+    </script>
+</body>
+</html>
