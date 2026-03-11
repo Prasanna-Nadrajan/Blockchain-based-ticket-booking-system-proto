@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Ticket App</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.11.1/ethers.umd.min.js"></script>
+    <style>
+        .hero {
+            text-align: center;
+            padding: 4rem 0 2rem;
+        }
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+        }
+        .hero p {
+            color: var(--text-muted);
+            font-size: 1.25rem;
+            max-width: 600px;
+            margin: 0 auto 3rem;
+        }
+        .roles-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .role-card {
+            text-align: center;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+        }
+        .role-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            display: inline-block;
+        }
+        .role-card h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+        }
+        .role-card p {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        #walletInfo {
+            display: none;
+            margin-top: 2rem;
+            padding: 1rem;
+            border-radius: var(--radius);
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <a href="index.html" class="logo">
+            <span class="gradient-text">NFTTix</span>
+        </a>
+        <button id="connectBtn" class="btn btn-primary">Connect Wallet</button>
+    </nav>
+
+    <div class="container animate">
+        <div class="hero">
+            <h1>The Future of <span class="gradient-text">Ticketing</span></h1>
+            <p>Secure, transparent, and verifiable event tickets powered by the blockchain and NFTs.</p>
+            
+            <div id="walletInfo">
+                <p>Connected: <strong id="walletAddressDisplay"></strong></p>
+                <p style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.5rem;">
+                    Detected Roles: <span id="walletRoles">...</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="roles-grid">
+            <a href="organizer.html" class="card role-card">
+                <span class="role-icon">🏟️</span>
+                <h3>Organizer</h3>
+                <p>Create events, mint NFT tickets in batches, and manage gate verifiers.</p>
+            </a>
+            <a href="holder.html" class="card role-card">
+                <span class="role-icon">🎫</span>
+                <h3>Ticket Holder</h3>
+                <p>View your tickets, generate QR codes, and securely transfer to others.</p>
+            </a>
+            <a href="verifier.html" class="card role-card">
+                <span class="role-icon">🔍</span>
+                <h3>Gate Verifier</h3>
+                <p>Scan QR codes and verify ticket authenticity on-chain.</p>
+            </a>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            initApp();
+            
+            // Check if already connected
+            if (await checkConnection()) {
+                updateUIForConnected();
+            }
+
+            document.getElementById('connectBtn').addEventListener('click', async () => {
+                const connected = await connectWallet();
+                if (connected) {
+                    updateUIForConnected();
+                }
+            });
+        });
+
+        async function updateUIForConnected() {
+            const btn = document.getElementById('connectBtn');
+            btn.innerHTML = `<div class="status-dot connected"></div> ${window.userAddress.substring(0,6)}...${window.userAddress.substring(38)}`;
+            btn.classList.remove('btn-primary');
+            
+            document.getElementById('walletInfo').style.display = 'block';
+            document.getElementById('walletAddressDisplay').innerText = window.userAddress;
+            
+            // Fetch roles from backend
+            try {
+                const res = await fetch('http://localhost:8000/me/role', {
+                    headers: { 'X-Wallet-Address': window.userAddress }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('walletRoles').innerText = data.roles.join(', ');
+                }
+            } catch (e) {
+                console.error("Backend not running or contract not deployed yet.");
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>My Tickets - NFTTix</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.11.1/ethers.umd.min.js"></script>
+    <style>
+        .ticket-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        .ticket-card {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .ticket-id {
+            position: absolute;
+            top: 0; right: 0;
+            background: var(--surface-color);
+            padding: 0.5rem 1rem;
+            border-bottom-left-radius: 12px;
+            font-family: monospace;
+            color: var(--text-muted);
+            border-left: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .qr-placeholder {
+            width: 100%;
+            aspect-ratio: 1;
+            background: var(--surface-color);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <a href="index.html" class="logo">
+            <span class="gradient-text">NFTTix</span> <span style="font-size: 0.875rem; color: #9ca3af; font-weight: 500;">| My Wallet</span>
+        </a>
+        <div class="wallet-badge" id="walletBadge">
+            <div class="status-dot"></div> Not Connected
+        </div>
+    </nav>
+
+    <div class="container" id="appRoot"></div>
+
+    <template id="dashboardHtml">
+        <h2 style="margin-bottom: 0.5rem">My NFT Tickets</h2>
+        <p style="color: var(--text-muted);">View your digital tickets and generate QR codes for gate entry.</p>
+        
+        <div class="ticket-grid" id="ticketGrid">
+            <!-- Tickets injected via JS -->
+            <p style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 3rem;">Loading tickets from blockchain...</p>
+        </div>
+        
+        <!-- QR / Transfer Modal -->
+        <div class="modal-overlay" id="actionModal">
+            <div class="modal">
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+                <div id="modalContent"></div>
+            </div>
+        </div>
+    </template>
+
+    <script src="app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initApp();
+            const connected = await checkConnection();
+            
+            if (connected) {
+                renderDashboard();
+            } else {
+                document.getElementById('appRoot').innerHTML = renderGuard();
+            }
+        });
+
+        function renderDashboard() {
+            document.getElementById('walletBadge').innerHTML = `<div class="status-dot connected"></div> ${window.userAddress.substring(0,6)}...${window.userAddress.substring(38)}`;
+            document.getElementById('appRoot').innerHTML = document.getElementById('dashboardHtml').innerHTML;
+            
+            loadMyTickets();
+        }
+
+        async function loadMyTickets() {
+            const grid = document.getElementById('ticketGrid');
+            try {
+                // Fetch from backend indexer (fastest way to get off-chain event names combined with tokens)
+                const tickets = await apiCall(`/tickets?owner=${window.userAddress}`, { method: 'GET' });
+                
+                grid.innerHTML = '';
+                if (tickets.length === 0) {
+                    grid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 3rem;">You don\'t own any tickets.</p>';
+                    return;
+                }
+                
+                tickets.forEach(t => {
+                    const status = t.is_used 
+                        ? `<span class="badge badge-used">USED</span>` 
+                        : `<span class="badge badge-available">VALID</span>`;
+                        
+                    grid.innerHTML += `
+                        <div class="ticket-card animate">
+                            <div class="ticket-id">#${t.token_id}</div>
+                            <h3>${t.event_name}</h3>
+                            <div style="margin-top: auto">
+                                ${status}
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                                <button class="btn btn-primary" style="flex: 1" onclick="showQR(${t.token_id})">Show QR</button>
+                                <button class="btn" onclick="showTransferModal(${t.token_id})" ${t.is_used ? 'disabled' : ''}>Transfer</button>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (err) {
+                grid.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--danger);">Failed to load tickets: ${err.message}</p>`;
+            }
+        }
+
+        async function showQR(tokenId) {
+            const modal = document.getElementById('actionModal');
+            const content = document.getElementById('modalContent');
+            content.innerHTML = `<h3 style="margin-bottom:1rem;text-align:center">Generating QR...</h3>`;
+            modal.classList.add('active');
+            
+            try {
+                const res = await apiCall(`/tickets/${tokenId}/qr`, { method: 'GET' });
+                content.innerHTML = `
+                    <h3 style="margin-bottom: 1.5rem; text-align: center">Entry Pass #${tokenId}</h3>
+                    <img src="${res.qr_base64}" alt="QR Code" style="width: 100%; border-radius: 8px; border: 10px solid white; display: block; margin: 0 auto;">
+                    <p style="text-align: center; color: var(--text-muted); margin-top: 1rem; font-size: 0.875rem">Present this at the gate</p>
+                `;
+            } catch (e) {
+                content.innerHTML = `<p style="color:var(--danger)">Failed to generate QR</p>`;
+            }
+        }
+
+        function showTransferModal(tokenId) {
+            const modal = document.getElementById('actionModal');
+            const content = document.getElementById('modalContent');
+            content.innerHTML = `
+                <h3 style="margin-bottom: 1rem">Transfer Ticket #${tokenId}</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.875rem;">
+                    Send this NFT to a friend. This action is irreversible and requires a gas fee.
+                </p>
+                <div class="form-group">
+                    <label>Recipient Ethereum Address</label>
+                    <input type="text" id="transferRecipient" placeholder="0x..." />
+                </div>
+                <button class="btn btn-primary" style="width: 100%" id="confirmTransferBtn" onclick="executeTransfer(${tokenId})">Transfer Ticket</button>
+            `;
+            modal.classList.add('active');
+        }
+
+        async function executeTransfer(tokenId) {
+            const recipient = document.getElementById('transferRecipient').value;
+            if (!ethers.isAddress(recipient)) return alert("Invalid Ethereum address");
+            
+            const btn = document.getElementById('confirmTransferBtn');
+            btn.disabled = true;
+            btn.innerText = "Confirm in MetaMask...";
+            
+            try {
+                // Call contract method: transferFrom(from, to, tokenId)
+                const tx = await window.contract.transferFrom(window.userAddress, recipient, tokenId);
+                btn.innerText = "Mining Transaction...";
+                await tx.wait();
+                
+                showToast("Success", `Ticket sent to ${recipient.substring(0,8)}...`);
+                closeModal();
+                loadMyTickets(); // reload grid
+            } catch (e) {
+                console.error(e);
+                showToast("Transfer Failed", e.reason || e.message, true);
+                btn.disabled = false;
+                btn.innerText = "Transfer Ticket";
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('actionModal').classList.remove('active');
+        }
+    </script>
+</body>
+</html>

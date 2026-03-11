@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Gate Verifier - NFTTix</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.11.1/ethers.umd.min.js"></script>
+    <style>
+        .scanner-card {
+            max-width: 500px;
+            margin: 2rem auto;
+            text-align: center;
+        }
+        .payload-input {
+            width: 100%;
+            height: 100px;
+            font-family: monospace;
+            background: rgba(0,0,0,0.3);
+            border: 1px dashed var(--border-color);
+            color: var(--text-main);
+            padding: 1rem;
+            margin-bottom: 1rem;
+            resize: none;
+            outline: none;
+        }
+        .payload-input:focus { border-color: var(--primary-accent); }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <a href="index.html" class="logo"><span class="gradient-text">NFTTix</span> <span style="font-size: 0.875rem; color: #9ca3af; font-weight: 500;">| Verifier Terminal</span></a>
+        <div class="wallet-badge" id="walletBadge"><div class="status-dot"></div> Not Connected</div>
+    </nav>
+
+    <div class="container" id="appRoot"></div>
+
+    <template id="dashboardHtml">
+        <div class="card scanner-card">
+            <h2 style="margin-bottom: 0.5rem">Ticket Verification</h2>
+            <p style="color: var(--text-muted); margin-bottom: 2rem;">Scan a QR or paste a payload to verify on-chain.</p>
+            
+            <textarea id="payloadInput" class="payload-input" placeholder='Paste payload here... e.g. {"token_id": 1, "event_id": "EVT-001"}'></textarea>
+            
+            <div style="display: flex; gap: 1rem;">
+                <button class="btn btn-primary" style="flex: 2" id="verifyBtn" onclick="verifyPayload()">Verify & Mark Used</button>
+            </div>
+            
+            <!-- Result Banner (Hidden initially) -->
+            <div id="resultBanner" class="result-banner">
+                <div class="result-icon" id="resultIcon">✅</div>
+                <h2 id="resultTitle">VALID TICKET</h2>
+                <p id="resultDesc" style="color: var(--text-muted); margin-top: 0.5rem;"></p>
+                <div id="actionContainer" style="margin-top: 1rem;"></div>
+            </div>
+        </div>
+    </template>
+
+    <script src="app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initApp();
+            const connected = await checkConnection();
+            
+            if (connected) {
+                // Check if they are a registered verifier
+                try {
+                    const res = await apiCall('/me/role');
+                    if (!res.roles.includes("VERIFIER") && !res.roles.includes("ORGANIZER")) {
+                        document.getElementById('appRoot').innerHTML = `
+                            <div class="card" style="text-align: center; padding: 4rem; max-width: 500px; margin: 0 auto">
+                                <h2 style="color: var(--danger)">Unauthorized Verifier</h2>
+                                <p style="margin-top: 1rem">Your wallet is not registered as a Gate Verifier.</p>
+                                <p>An Organizer must add your address (${window.userAddress.substring(0,8)}...) via their dashboard first.</p>
+                            </div>
+                        `;
+                    } else {
+                        renderDashboard();
+                    }
+                } catch (e) {
+                    document.getElementById('appRoot').innerHTML = renderGuard();
+                }
+            } else {
+                document.getElementById('appRoot').innerHTML = renderGuard();
+            }
+        });
+
+        function renderDashboard() {
+            document.getElementById('walletBadge').innerHTML = `<div class="status-dot connected"></div> ${window.userAddress.substring(0,6)}...${window.userAddress.substring(38)}`;
+            document.getElementById('appRoot').innerHTML = document.getElementById('dashboardHtml').innerHTML;
+        }
+
+        async function verifyPayload() {
+            const raw = document.getElementById('payloadInput').value.trim();
+            const banner = document.getElementById('resultBanner');
+            if(!raw) return showToast("Error", "Empty payload", true);
+            
+            let payload;
+            try {
+                payload = JSON.parse(raw);
+                if(payload.token_id === undefined) throw new Error("Missing token_id");
+            } catch (e) {
+                showResult(false, "Invalid QR Format", "The scanned payload is not recognized by this system.");
+                return;
+            }
+            
+            const btn = document.getElementById('verifyBtn');
+            btn.disabled = true;
+            btn.innerText = "Checking on-chain...";
+            banner.style.display = 'none';
+
+            /**
+             * Data Flow:
+             * 1. Backend checks if ticket is used (read)
+             * 2. If valid, frontend executes markUsed(tokenId) tx on Ethereum via MetaMask
+             * 3. We show success
+             */
+            
+            try {
+                // Step 1: Query backend API validation
+                const check = await apiCall('/verify', { 
+                    method: 'POST', 
+                    body: { token_id: parseInt(payload.token_id), verifier_address: window.userAddress }
+                });
+                
+                if (check.status === "INVALID") {
+                    showResult(false, "TICKET INVALID", check.reason === "already_used" ? "This ticket has already been used." : "Ticket not found or owned by zero address.");
+                    btn.disabled = false;
+                    btn.innerText = "Verify & Mark Used";
+                    return;
+                }
+                
+                // Step 2: It is valid off-chain, now execute the smart contract tx to mark it used!
+                btn.innerText = "Execute Transaction...";
+                
+                try {
+                    const tx = await window.contract.markUsed(payload.token_id);
+                    btn.innerText = "Mining block...";
+                    await tx.wait(); // Wait for tx confirmation
+                    
+                    showResult(true, "TICKET VALID", `Admit One. Token #${payload.token_id}<br/>Owner: ${check.owner.substring(0,12)}...<br/><br/><strong>Marked as used on-chain.</strong>`);
+                } catch (txErr) {
+                    console.error(txErr);
+                    showResult(false, "TRANSACTION FAILED", "Could not submit markUsed transaction to the blockchain. User rejected or out of gas.");
+                }
+
+            } catch (e) {
+                showResult(false, "API ERROR", e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Verify Next Ticket";
+                document.getElementById('payloadInput').value = '';
+            }
+        }
+        
+        function showResult(isValid, title, desc) {
+            const banner = document.getElementById('resultBanner');
+            const icon = document.getElementById('resultIcon');
+            const t = document.getElementById('resultTitle');
+            const d = document.getElementById('resultDesc');
+            
+            banner.className = `result-banner ${isValid ? 'valid' : 'invalid'}`;
+            icon.innerText = isValid ? '✅' : '❌';
+            t.innerText = title;
+            d.innerHTML = desc;
+            banner.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
