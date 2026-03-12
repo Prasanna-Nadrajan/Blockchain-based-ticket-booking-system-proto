@@ -8,6 +8,9 @@ import base64
 import qrcode
 from io import BytesIO
 from web3 import Web3
+from dotenv import load_dotenv
+
+load_dotenv() # Load variables from .env if present
 
 app = FastAPI(title="NFT Ticket API")
 
@@ -61,6 +64,7 @@ class Event(BaseModel):
     date: str
     venue: str
     total_capacity: int
+    price_eth: float = 0.01
 # --- Persisted store ---
 DB_FILE = os.path.join(BASE_DIR, "events_db.json")
 events_db: dict[str, Event] = {}
@@ -171,28 +175,38 @@ def list_marketplace():
     c = get_contract()
     if not c:
         return []
-    
+        
     marketplace = []
     for event_id, ev in events_db.items():
         try:
             # Query blockchain for current counts
             max_supply = c.functions.eventMaxSupply(event_id).call()
             minted_count = c.functions.eventMintedCount(event_id).call()
-            # If max_supply is 0, organizer hasn't called setEventParams on-chain yet
-            if max_supply == 0:
-                continue
-                
+            
+            # Fix: If on-chain max_supply is 0, fallback to off-chain db capacity
+            total = max_supply if max_supply > 0 else ev.total_capacity
+            available = total - minted_count
+            
             marketplace.append({
                 "id": ev.id,
                 "name": ev.name,
                 "date": ev.date,
                 "venue": ev.venue,
                 "price_eth": ev.price_eth,
-                "available": max_supply - minted_count,
-                "total": max_supply
+                "available": available,
+                "total": total
             })
         except Exception:
-            continue
+            # Fallback if contract read fails entirely
+            marketplace.append({
+                "id": ev.id,
+                "name": ev.name,
+                "date": ev.date,
+                "venue": ev.venue,
+                "price_eth": ev.price_eth,
+                "available": ev.total_capacity,
+                "total": ev.total_capacity
+            })
     return marketplace
 
 class GenerateReq(BaseModel):
@@ -364,6 +378,204 @@ def verify_ticket(req: VerifyReq, wallet: str = Depends(get_current_wallet)):
          return {"status": "INVALID", "reason": "not_found", "details": str(e)}
 
         
+class EmailReq(BaseModel):
+    email: str
+
+@app.post("/events/{event_id}/send-receipt")
+def send_email_receipt(event_id: str, req: EmailReq, wallet: str = Depends(get_current_wallet)):
+    c = get_contract()
+    if not c:
+        raise HTTPException(status_code=500, detail="Contract not configured")
+
+    # 1. Find the user's most recent ticket for this event
+    try:
+        total_minted = c.functions.totalMinted().call()
+        my_token_id = None
+        # Search backwards to get the most recently minted one
+        for i in range(total_minted - 1, -1, -1):
+            owner = c.functions.ownerOf(i).call().lower()
+            token_event = c.functions.tokenEvent(i).call()
+            if owner == wallet and token_event == event_id:
+                my_token_id = i
+                break
+                
+        if my_token_id is None:
+            raise HTTPException(status_code=404, detail="No ticket found for this wallet and event")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error finding ticket: {str(e)}")
+
+    # 2. Generate QR Code
+    payload = json.dumps({
+        "token_id": my_token_id,
+        "event_id": event_id
+    })
+    
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    qr_bytes = buffered.getvalue()
+
+    # 3. Send Email using python built-in smtplib
+    import smtplib
+    import os
+    from email.message import EmailMessage
+
+    event_name = events_db[event_id].name if event_id in events_db else "Unknown Event"
+
+    msg = EmailMessage()
+    msg['Subject'] = f'Your Ticket for {event_name}'
+    
+    # Configure SMTP credentials from environment
+    smtp_server = os.getenv("SMTP_SERVER", "localhost")
+    smtp_port = int(os.getenv("SMTP_PORT", "1025"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_pass = os.getenv("SMTP_PASS")
+    
+    sender_email = smtp_user if smtp_user else "tickets@nfttix.local"
+    msg['From'] = sender_email
+    msg['To'] = req.email
+    msg.set_content(f"""
+    Hello!
+    
+    Thank you for registering for {event_name}.
+    
+    Please find your entry QR code attached to this email. Show this at the gate.
+    
+    Event Details:
+    Name: {event_name}
+    Ticket ID: #{my_token_id}
+    
+    Enjoy the event!
+    The NFTTix Team
+    """)
+    
+    msg.add_attachment(qr_bytes, maintype='image', subtype='png', filename=f'ticket_{my_token_id}.png')
+
+    try:
+        if smtp_user and smtp_pass:
+            # Connect to a real SMTP server (e.g. Gmail)
+            if smtp_port == 465:
+                with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
+                    server.starttls() # Secure the connection
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+            print(f"✅ Email receipt successfully sent via real SMTP to {req.email}")
+        else:
+            # Fallback to local test SMTP
+            with smtplib.SMTP('localhost', 1025) as server:
+                server.send_message(msg)
+            print(f"✅ Email receipt successfully sent to {req.email} via local SMTP")
+    except Exception as e:
+        print("\n" + "="*50)
+        print(f"📧 EMAIL RECEIPT GENERATED for {req.email} (Email send failed: {e})")
+        print("="*50)
+        print(msg.as_string())
+        print("="*50 + "\n")
+        raise HTTPException(status_code=500, detail=f"Email send failed: {str(e)}")
+
+    return {"message": "Receipt processed successfully", "token_id": my_token_id}
+
+
+@app.post("/tickets/{ticket_id}/transfer-email")
+def transfer_email_receipt(ticket_id: int, req: EmailReq, wallet: str = Depends(get_current_wallet)):
+    c = get_contract()
+    if not c:
+        raise HTTPException(status_code=500, detail="Contract not configured")
+
+    # 1. Verify Ownership
+    try:
+        owner = c.functions.ownerOf(ticket_id).call().lower()
+        if owner != wallet:
+            raise HTTPException(status_code=403, detail="You do not own this ticket")
+            
+        event_id = c.functions.tokenEvent(ticket_id).call()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error validating ticket: {str(e)}")
+
+    # 2. Generate QR Code
+    payload = json.dumps({
+        "token_id": ticket_id,
+        "event_id": event_id
+    })
+    
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    qr_bytes = buffered.getvalue()
+
+    # 3. Send Email using python built-in smtplib
+    import smtplib
+    import os
+    from email.message import EmailMessage
+
+    event_name = events_db[event_id].name if event_id in events_db else "Unknown Event"
+
+    msg = EmailMessage()
+    msg['Subject'] = f'Ticket Transfer: {event_name}'
+    
+    # Configure SMTP credentials from environment
+    smtp_server = os.getenv("SMTP_SERVER", "localhost")
+    smtp_port = int(os.getenv("SMTP_PORT", "1025"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_pass = os.getenv("SMTP_PASS")
+    
+    sender_email = smtp_user if smtp_user else "tickets@nfttix.local"
+    msg['From'] = sender_email
+    msg['To'] = req.email
+    msg.set_content(f"""
+    Hello!
+    
+    A friend ({wallet}) has transferred a ticket to you for {event_name}!
+    
+    Ticket ID: #{ticket_id}
+    
+    Please find your entry QR code attached to this email. Show this at the gate.
+    
+    Enjoy the event!
+    The NFTTix Team
+    """)
+    
+    msg.add_attachment(qr_bytes, maintype='image', subtype='png', filename=f'transfer_ticket_{ticket_id}.png')
+
+    try:
+        if smtp_user and smtp_pass:
+            if smtp_port == 465:
+                with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+            print(f"✅ Transfer Email successfully sent via real SMTP to {req.email}")
+        else:
+            with smtplib.SMTP('localhost', 1025) as server:
+                server.send_message(msg)
+            print(f"✅ Transfer Email successfully sent to {req.email} via local SMTP")
+    except Exception as e:
+        print("\n" + "="*50)
+        print(f"📧 TRANSFER EMAIL GENERATED for {req.email} (Email send failed: {e})")
+        print("="*50)
+        print(msg.as_string())
+        print("="*50 + "\n")
+        raise HTTPException(status_code=500, detail=f"Email send failed: {str(e)}")
+
+    return {"message": "Ticket successfully emailed", "token_id": ticket_id}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

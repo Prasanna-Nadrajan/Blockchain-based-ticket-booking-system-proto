@@ -179,39 +179,39 @@
             content.innerHTML = `
                 <h3 style="margin-bottom: 1rem">Transfer Ticket #${tokenId}</h3>
                 <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.875rem;">
-                    Send this NFT to a friend. This action is irreversible and requires a gas fee.
+                    Send this ticket pass to a friend via email. They will receive the QR code to enter the event.
                 </p>
                 <div class="form-group">
-                    <label>Recipient Ethereum Address</label>
-                    <input type="text" id="transferRecipient" placeholder="0x..." />
+                    <label>Recipient Email Address</label>
+                    <input type="email" id="transferRecipient" placeholder="friend@example.com" />
                 </div>
-                <button class="btn btn-primary" style="width: 100%" id="confirmTransferBtn" onclick="executeTransfer(${tokenId})">Transfer Ticket</button>
+                <button class="btn btn-primary" style="width: 100%" id="confirmTransferBtn" onclick="executeTransfer(${tokenId})">Send Ticket via Email</button>
             `;
             modal.classList.add('active');
         }
 
         async function executeTransfer(tokenId) {
-            const recipient = document.getElementById('transferRecipient').value;
-            if (!ethers.isAddress(recipient)) return alert("Invalid Ethereum address");
+            const recipient = document.getElementById('transferRecipient').value.trim();
+            if (!recipient || !recipient.includes('@')) return alert("Invalid email address");
             
             const btn = document.getElementById('confirmTransferBtn');
             btn.disabled = true;
-            btn.innerText = "Confirm in MetaMask...";
+            btn.innerText = "Sending Email...";
             
             try {
-                // Call contract method: transferFrom(from, to, tokenId)
-                const tx = await window.contract.transferFrom(window.userAddress, recipient, tokenId);
-                btn.innerText = "Mining Transaction...";
-                await tx.wait();
+                // Call backend API to email the QR code
+                await apiCall(`/tickets/${tokenId}/transfer-email`, { 
+                    method: 'POST',
+                    body: { email: recipient }
+                });
                 
-                showToast("Success", `Ticket sent to ${recipient.substring(0,8)}...`);
+                showToast("Success", `Ticket entry pass sent to ${recipient}`);
                 closeModal();
-                loadMyTickets(); // reload grid
             } catch (e) {
                 console.error(e);
-                showToast("Transfer Failed", e.reason || e.message, true);
+                showToast("Transfer Failed", e.reason || e.message || "Failed to send email", true);
                 btn.disabled = false;
-                btn.innerText = "Transfer Ticket";
+                btn.innerText = "Send Ticket via Email";
             }
         }
 

@@ -68,6 +68,23 @@
                 <p style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 5rem;">Loading events from blockchain...</p>
             </div>
         </div>
+
+        <!-- Custom Email Modal -->
+        <div class="modal-overlay" id="emailModal">
+            <div class="modal">
+                <button class="close-btn" onclick="closeEmailModal()">&times;</button>
+                <div id="emailModalContent">
+                    <h3 style="margin-bottom: 1rem">Registration Successful!</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.875rem;">
+                        Enter your email address to receive your QR code entry ticket.
+                    </p>
+                    <div class="form-group">
+                        <input type="email" id="receiptEmail" placeholder="you@example.com" />
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%" id="sendReceiptBtn">Send Ticket</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>
@@ -115,7 +132,7 @@
                                 style="margin-top: 1rem; width: 100%" 
                                 onclick="buyTicket('${ev.id}', '${ev.price_eth}')"
                                 ${isSoldOut ? 'disabled' : ''}>
-                                ${isSoldOut ? 'SOLD OUT' : 'Buy Ticket'}
+                                ${isSoldOut ? 'SOLD OUT' : 'Register'}
                             </button>
                         </div>
                     `;
@@ -148,16 +165,57 @@
                 
                 showToast("Success!", "You purchased a ticket! Visit 'My Tickets' to see it.");
                 loadMarketplace(); // Reload counts
+
+                // Show custom modal instead of prompt
+                setTimeout(() => {
+                    const modal = document.getElementById('emailModal');
+                    const btnSend = document.getElementById('sendReceiptBtn');
+                    const inputEmail = document.getElementById('receiptEmail');
+                    
+                    inputEmail.value = ''; // Reset input
+                    modal.classList.add('active');
+                    
+                    // Remove old listeners to prevent duplicates if they buy multiple tickets
+                    const newBtn = btnSend.cloneNode(true);
+                    btnSend.parentNode.replaceChild(newBtn, btnSend);
+                    
+                    newBtn.addEventListener('click', async () => {
+                        const email = inputEmail.value.trim();
+                        if (!email) return alert("Please enter an email");
+                        
+                        try {
+                            newBtn.disabled = true;
+                            newBtn.innerText = "Sending...";
+                            await apiCall(`/events/${eventId}/send-receipt`, { 
+                                method: 'POST',
+                                body: { email: email }
+                            });
+                            showToast("Email Sent!", "Your ticket QR has been sent to your email.");
+                            closeEmailModal();
+                        } catch (emailErr) {
+                            console.error("Email send failed:", emailErr);
+                            showToast("Email Error", "Failed to send email receipt, but you still own the ticket.", true);
+                        } finally {
+                            newBtn.disabled = false;
+                            newBtn.innerText = "Send Ticket";
+                        }
+                    });
+                }, 500);
+                
             } catch (err) {
                 console.error(err);
-                showToast("Purchase Failed", err.reason || err.message, true);
+                showToast("Registration Failed", err.reason || err.message, true);
             } finally {
                 const btn = document.querySelector(`button[onclick*='${eventId}']`);
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerText = "Buy Ticket";
+                    btn.innerText = "Register";
                 }
             }
+        }
+
+        function closeEmailModal() {
+            document.getElementById('emailModal').classList.remove('active');
         }
     </script>
 </body>

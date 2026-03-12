@@ -47,13 +47,13 @@
             color: var(--text-muted);
             font-size: 0.875rem;
         }
-        #walletInfo {
-            display: none;
+        #roleInfo {
             margin-top: 2rem;
-            padding: 1rem;
+            padding: 1rem 2rem;
             border-radius: var(--radius);
             background: rgba(16, 185, 129, 0.1);
             border: 1px solid rgba(16, 185, 129, 0.3);
+            display: inline-block;
         }
     </style>
 </head>
@@ -63,7 +63,10 @@
         <a href="index.html" class="logo">
             <span class="gradient-text">NFTTix</span>
         </a>
-        <button id="connectBtn" class="btn btn-primary">Connect Wallet</button>
+        <div style="display: flex; gap: 1rem;">
+            <button id="connectBtn" class="btn btn-primary">Connect Wallet</button>
+            <button id="logoutBtn" class="btn" style="border: 1px solid var(--danger); color: var(--danger); display: none;">Logout</button>
+        </div>
     </nav>
 
     <div class="container animate">
@@ -71,31 +74,33 @@
             <h1>The Future of <span class="gradient-text">Ticketing</span></h1>
             <p>Secure, transparent, and verifiable event tickets powered by the blockchain and NFTs.</p>
             
-            <div id="walletInfo">
-                <p>Connected: <strong id="walletAddressDisplay"></strong></p>
-                <p style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.5rem;">
-                    Detected Roles: <span id="walletRoles">...</span>
+            <div id="roleInfo">
+                <p style="font-size: 1.25rem; font-weight: 600; color: #10b981; margin: 0;">
+                    Detected Role :- <span id="loginRoleDisplay" style="text-transform: capitalize;"></span>
+                </p>
+                <p id="walletConnectedText" style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.5rem; display: none;">
+                    Connected Wallet: <strong id="walletAddressDisplay"></strong>
                 </p>
             </div>
         </div>
 
         <div class="roles-grid">
-            <a href="organizer.html" class="card role-card">
+            <a href="organizer.html" class="card role-card" id="card-organizer">
                 <span class="role-icon">🏟️</span>
                 <h3>Organizers</h3>
                 <p>Create events, set ticket prices, and register everything on the blockchain.</p>
             </a>
-            <a href="explore.html" class="card role-card">
+            <a href="explore.html" class="card role-card" id="card-buy">
                 <span class="role-icon">🎫</span>
                 <h3>Buy Tickets</h3>
                 <p>Explore the marketplace and purchase NFT tickets directly from promoters.</p>
             </a>
-            <a href="holder.html" class="card role-card">
+            <a href="holder.html" class="card role-card" id="card-wallet">
                 <span class="role-icon">👝</span>
                 <h3>My Wallet</h3>
                 <p>View your purchased tickets, generate entry QRs, and transfer to friends.</p>
             </a>
-            <a href="verifier.html" class="card role-card">
+            <a href="verifier.html" class="card role-card" id="card-verifier">
                 <span class="role-icon">🔍</span>
                 <h3>Gate Verifiers</h3>
                 <p>Scan attendee QR codes and verify ticket authenticity on-chain.</p>
@@ -106,6 +111,51 @@
     <script src="app.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', async () => {
+            // --- NEW: RBAC Logic ---
+            const currentRole = sessionStorage.getItem('appRole');
+            
+            // Redirect to login if no role is found
+            if (!currentRole) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Show logout button
+            const logoutBtn = document.getElementById('logoutBtn');
+            logoutBtn.style.display = 'block';
+            logoutBtn.addEventListener('click', () => {
+                sessionStorage.removeItem('appRole');
+                window.location.href = 'login.html';
+            });
+
+            // Conditional rendering logic from requirements:
+            const cardOrg = document.getElementById('card-organizer');
+            const cardBuy = document.getElementById('card-buy');
+            const cardVer = document.getElementById('card-verifier');
+            const cardWallet = document.getElementById('card-wallet');
+            
+            if (currentRole === 'user') {
+                // hide create event (organizer) and gate verifier
+                if (cardOrg) cardOrg.style.display = 'none';
+                if (cardVer) cardVer.style.display = 'none';
+            } 
+            else if (currentRole === 'organizer') {
+                // hide gate verifier and buy tickets
+                if (cardVer) cardVer.style.display = 'none';
+                if (cardBuy) cardBuy.style.display = 'none';
+            } 
+            else if (currentRole === 'verifier') {
+                // hide create event (organizer), buy tickets, and wallet
+                if (cardOrg) cardOrg.style.display = 'none';
+                if (cardBuy) cardBuy.style.display = 'none';
+                if (cardWallet) cardWallet.style.display = 'none';
+            }
+            // --- END RBAC Logic ---
+
+            // Display current role in green box
+            const displayRole = currentRole === 'verifier' ? 'Gate Verifier' : currentRole;
+            document.getElementById('loginRoleDisplay').innerText = displayRole;
+
             initApp();
             
             // Check if already connected
@@ -126,21 +176,8 @@
             btn.innerHTML = `<div class="status-dot connected"></div> ${window.userAddress.substring(0,6)}...${window.userAddress.substring(38)}`;
             btn.classList.remove('btn-primary');
             
-            document.getElementById('walletInfo').style.display = 'block';
+            document.getElementById('walletConnectedText').style.display = 'block';
             document.getElementById('walletAddressDisplay').innerText = window.userAddress;
-            
-            // Fetch roles from backend
-            try {
-                const res = await fetch('http://localhost:8000/me/role', {
-                    headers: { 'X-Wallet-Address': window.userAddress }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    document.getElementById('walletRoles').innerText = data.roles.join(', ');
-                }
-            } catch (e) {
-                console.error("Backend not running or contract not deployed yet.");
-            }
         }
     </script>
 </body>

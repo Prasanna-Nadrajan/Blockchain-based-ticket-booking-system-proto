@@ -4,3 +4,4 @@ qrcode[pil]
 pillow
 python-multipart
 web3>=6.0.0
+python-dotenv

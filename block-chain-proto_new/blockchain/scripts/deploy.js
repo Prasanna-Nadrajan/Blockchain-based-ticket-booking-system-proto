@@ -7,7 +7,7 @@ async function main() {
   console.log("Deploying TicketNFT with account:", deployer.address);
   console.log("Account balance:", (await hre.ethers.provider.getBalance(deployer.address)).toString());
 
-  const userAddress = "0xbb33b2ae53215b98b2cb4d3abe22cc55b25ddaf2";
+  const userAddress = "0x33497c9f49a5cffd78d6235c5cda5ba3083dd781";
 
   // Fund the user's wallet with test ETH from the Hardhat node 
   console.log("Funding user wallet with 100 ETH...");
