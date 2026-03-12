@@ -61,10 +61,28 @@ class Event(BaseModel):
     date: str
     venue: str
     total_capacity: int
-
-# In-memory store
+# --- Persisted store ---
+DB_FILE = os.path.join(BASE_DIR, "events_db.json")
 events_db: dict[str, Event] = {}
 event_counter = 1
+
+def save_db():
+    with open(DB_FILE, "w") as f:
+        data = {eid: ev.model_dump() for eid, ev in events_db.items()}
+        json.dump({"events": data, "counter": event_counter}, f)
+
+def load_db():
+    global events_db, event_counter
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                data = json.load(f)
+                events_db = {eid: Event(**ev) for eid, ev in data["events"].items()}
+                event_counter = data["counter"]
+        except Exception as e:
+            print(f"Error loading DB: {e}")
+
+load_db()
 
 # --- RBAC Helper ---
 def get_current_wallet(x_wallet_address: Optional[str] = Header(None)):
@@ -77,11 +95,12 @@ def get_current_wallet(x_wallet_address: Optional[str] = Header(None)):
 @app.get("/me/role")
 def get_role(wallet: str = Depends(get_current_wallet)):
     """Detect caller's role from wallet address"""
+    print(f"Checking roles for wallet: {wallet}")
     c = get_contract()
     if not c:
         return {"role": "UNKNOWN", "message": "Contract not deployed yet"}
     
-    global organizer_address
+    print(f"Comparing wallet: '{wallet}' with organizer: '{organizer_address}'")
     roles = []
     if wallet == organizer_address:
         roles.append("ORGANIZER")
@@ -116,6 +135,7 @@ class CreateEventReq(BaseModel):
     date: str
     venue: str
     capacity: int
+    price_eth: float = 0.01
 
 @app.post("/events", status_code=201)
 def create_event(req: CreateEventReq, wallet: str = Depends(get_current_wallet)):
@@ -134,14 +154,46 @@ def create_event(req: CreateEventReq, wallet: str = Depends(get_current_wallet))
         name=req.name,
         date=req.date,
         venue=req.venue,
-        total_capacity=req.capacity
+        total_capacity=req.capacity,
+        price_eth=req.price_eth
     )
     events_db[event_id] = new_event
+    save_db()
     return new_event
 
 @app.get("/events")
 def list_events():
     return list(events_db.values())
+
+@app.get("/marketplace")
+def list_marketplace():
+    """Returns available events with pricing and supply info from blockchain."""
+    c = get_contract()
+    if not c:
+        return []
+    
+    marketplace = []
+    for event_id, ev in events_db.items():
+        try:
+            # Query blockchain for current counts
+            max_supply = c.functions.eventMaxSupply(event_id).call()
+            minted_count = c.functions.eventMintedCount(event_id).call()
+            # If max_supply is 0, organizer hasn't called setEventParams on-chain yet
+            if max_supply == 0:
+                continue
+                
+            marketplace.append({
+                "id": ev.id,
+                "name": ev.name,
+                "date": ev.date,
+                "venue": ev.venue,
+                "price_eth": ev.price_eth,
+                "available": max_supply - minted_count,
+                "total": max_supply
+            })
+        except Exception:
+            continue
+    return marketplace
 
 class GenerateReq(BaseModel):
     count: int
@@ -205,24 +257,28 @@ def list_my_tickets(owner: str, wallet: str = Depends(get_current_wallet)):
         return []
 
     total_minted = c.functions.totalMinted().call()
+    print(f"Total minted tokens on-chain: {total_minted}")
+    
     tickets = []
     for i in range(total_minted):
          try:
              token_owner = c.functions.ownerOf(i).call().lower()
              if token_owner == wallet:
                  token_event = c.functions.tokenEvent(i).call()
-                 is_used = c.functions.tokenUsed(i).call()
+                 print(f"Token {i} belongs to {wallet}. Event ID from chain: '{token_event}'")
                  
+                 is_used = c.functions.tokenUsed(i).call()
                  event_name = events_db[token_event].name if token_event in events_db else "Unknown Event"
                  
                  tickets.append({
                      "token_id": i,
-                     "event_id": token_event,
+                     "event_id": token_event or "UNKNOWN", # Fallback if empty
                      "event_name": event_name,
                      "owner": token_owner,
                      "is_used": is_used
                  })
-         except Exception:
+         except Exception as e:
+             print(f"Error reading token {i}: {e}")
              continue
     return tickets
 

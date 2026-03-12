@@ -7,15 +7,41 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.11.1/ethers.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
         .scanner-card {
             max-width: 500px;
             margin: 2rem auto;
             text-align: center;
         }
+        .video-container {
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: var(--radius);
+            overflow: hidden;
+            margin-bottom: 1rem;
+            position: relative;
+            display: none;
+            border: 2px solid var(--primary-accent);
+        }
+        #videoPreview {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .scanner-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70%; height: 70%;
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 2000px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
         .payload-input {
             width: 100%;
-            height: 100px;
+            height: 80px;
             font-family: monospace;
             background: rgba(0,0,0,0.3);
             border: 1px dashed var(--border-color);
@@ -24,6 +50,7 @@
             margin-bottom: 1rem;
             resize: none;
             outline: none;
+            font-size: 0.875rem;
         }
         .payload-input:focus { border-color: var(--primary-accent); }
     </style>
@@ -42,9 +69,16 @@
             <h2 style="margin-bottom: 0.5rem">Ticket Verification</h2>
             <p style="color: var(--text-muted); margin-bottom: 2rem;">Scan a QR or paste a payload to verify on-chain.</p>
             
+            <!-- Video Container -->
+            <div id="videoContainer" class="video-container">
+                <video id="videoPreview"></video>
+                <div class="scanner-overlay"></div>
+            </div>
+
             <textarea id="payloadInput" class="payload-input" placeholder='Paste payload here... e.g. {"token_id": 1, "event_id": "EVT-001"}'></textarea>
             
             <div style="display: flex; gap: 1rem;">
+                <button class="btn" style="flex: 1" id="scanBtn" onclick="toggleScanner()">📷 Scan Camera</button>
                 <button class="btn btn-primary" style="flex: 2" id="verifyBtn" onclick="verifyPayload()">Verify & Mark Used</button>
             </div>
             
@@ -92,6 +126,70 @@
             document.getElementById('appRoot').innerHTML = document.getElementById('dashboardHtml').innerHTML;
         }
 
+        let isScanning = false;
+        let videoStream = null;
+
+        async function toggleScanner() {
+            const container = document.getElementById('videoContainer');
+            const btn = document.getElementById('scanBtn');
+            const video = document.getElementById('videoPreview');
+
+            if (isScanning) {
+                stopScanner();
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                videoStream = stream;
+                video.srcObject = stream;
+                video.setAttribute("playsinline", true);
+                video.play();
+                
+                container.style.display = 'block';
+                btn.innerText = "🛑 Stop Camera";
+                isScanning = true;
+                requestAnimationFrame(scanTick);
+            } catch (err) {
+                showToast("Camera Error", "Could not access camera", true);
+            }
+        }
+
+        function stopScanner() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+            }
+            document.getElementById('videoContainer').style.display = 'none';
+            document.getElementById('scanBtn').innerText = "📷 Scan Camera";
+            isScanning = false;
+        }
+
+        function scanTick() {
+            if (!isScanning) return;
+            const video = document.getElementById('videoPreview');
+            const container = document.getElementById('videoContainer');
+
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                const canvas = document.createElement("canvas");
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+
+                if (code) {
+                    document.getElementById('payloadInput').value = code.data;
+                    stopScanner();
+                    showToast("QR Detected", "Payload loaded successfully");
+                    verifyPayload(); // Auto-verify
+                }
+            }
+            requestAnimationFrame(scanTick);
+        }
+
         async function verifyPayload() {
             const raw = document.getElementById('payloadInput').value.trim();
             const banner = document.getElementById('resultBanner');
@@ -102,7 +200,11 @@
                 payload = JSON.parse(raw);
                 if(payload.token_id === undefined) throw new Error("Missing token_id");
             } catch (e) {
-                showResult(false, "Invalid QR Format", "The scanned payload is not recognized by this system.");
+                let errorMsg = "The scanned payload is not recognized by this system.";
+                if (raw.startsWith("0x")) {
+                    errorMsg = "You pasted a wallet address instead of a ticket payload! Please use the 'Scan Camera' button or copy the '{...}' JSON from the My Wallet page.";
+                }
+                showResult(false, "Invalid Format", errorMsg);
                 return;
             }
             
@@ -133,12 +235,16 @@
                 }
                 
                 // Step 2: It is valid off-chain, now execute the smart contract tx to mark it used!
-                btn.innerText = "Execute Transaction...";
+                btn.innerText = "Check MetaMask Popup...";
+                showToast("Action Required", "Please confirm the transaction in your MetaMask popup.");
                 
                 try {
-                    const tx = await window.contract.markUsed(payload.token_id);
-                    btn.innerText = "Mining block...";
-                    await tx.wait(); // Wait for tx confirmation
+                    console.log("Calling markUsed for token:", payload.token_id);
+                    const tx = await window.contract.markUsed(parseInt(payload.token_id));
+                    btn.innerText = "Mining on Blockchain...";
+                    
+                    const receipt = await tx.wait(); 
+                    console.log("Transaction confirmed:", receipt.hash);
                     
                     showResult(true, "TICKET VALID", `Admit One. Token #${payload.token_id}<br/>Owner: ${check.owner.substring(0,12)}...<br/><br/><strong>Marked as used on-chain.</strong>`);
                 } catch (txErr) {
@@ -147,7 +253,16 @@
                 }
 
             } catch (e) {
-                showResult(false, "API ERROR", e.message);
+                let title = "API ERROR";
+                let msg = e.message;
+                
+                if (e.message.includes("403")) {
+                    title = "ACCESS DENIED";
+                    msg = `Your wallet (${window.userAddress.substring(0,8)}...) is not a registered verifier.<br/><br/>` +
+                          `<strong>Fix:</strong> Go to the 🏟️ <strong>Organizer Dashboard</strong> > <strong>Gate Verifiers</strong> tab and register this address.`;
+                }
+                
+                showResult(false, title, msg);
             } finally {
                 btn.disabled = false;
                 btn.innerText = "Verify Next Ticket";

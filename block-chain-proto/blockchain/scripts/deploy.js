@@ -7,10 +7,18 @@ async function main() {
   console.log("Deploying TicketNFT with account:", deployer.address);
   console.log("Account balance:", (await hre.ethers.provider.getBalance(deployer.address)).toString());
 
+  const userAddress = "0xbb33b2ae53215b98b2cb4d3abe22cc55b25ddaf2";
+
+  // Fund the user's wallet with test ETH from the Hardhat node 
+  console.log("Funding user wallet with 100 ETH...");
+  const tx = await deployer.sendTransaction({
+    to: userAddress,
+    value: hre.ethers.parseEther("100.0")
+  });
+  await tx.wait();
+
   // Deploy
   const TicketNFT = await hre.ethers.getContractFactory("TicketNFT");
-  // Give ownership (Organizer role) explicitly to the user's MetaMask address
-  const userAddress = "0xc6bcbb094636e8dea66c72b0ea02598166046bd6";
   const contract = await TicketNFT.deploy(userAddress);
   await contract.waitForDeployment();
 

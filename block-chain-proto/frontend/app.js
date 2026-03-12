@@ -10,7 +10,9 @@ window.contract = null;
 
 // The ABI for TicketNFT (copying essential methods here, better to load dynamically but this avoids complexity)
 const abi = [
-    "function mintBatch(string eventId, uint256 count, address recipient) external returns (uint256)",
+    "function buyTicket(string eventId) external payable",
+    "function setEventParams(string eventId, uint256 price, uint256 maxSupply) external",
+    "function mintBatch(string eventId, uint256 count, address recipient) external",
     "function addVerifier(address verifier) external",
     "function markUsed(uint256 tokenId) external",
     "function tokensOfOwnerForEvent(address wallet, string eventId) external view returns (uint256[])",

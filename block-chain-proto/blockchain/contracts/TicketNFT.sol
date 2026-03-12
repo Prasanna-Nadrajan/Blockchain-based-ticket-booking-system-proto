@@ -25,6 +25,15 @@ contract TicketNFT is ERC721, Ownable {
     /// token_id → used flag
     mapping(uint256 => bool) public tokenUsed;
 
+    /// event_id → price (in wei)
+    mapping(string => uint256) public eventPrice;
+
+    /// event_id → max supply
+    mapping(string => uint256) public eventMaxSupply;
+
+    /// event_id → minted count
+    mapping(string => uint256) public eventMintedCount;
+
     /// registered gate verifiers
     mapping(address => bool) public isVerifier;
 
@@ -34,16 +43,48 @@ contract TicketNFT is ERC721, Ownable {
     event TicketUsed(uint256 indexed tokenId, address indexed verifier);
     event VerifierAdded(address indexed verifier);
     event VerifierRemoved(address indexed verifier);
+    event EventParamsSet(string eventId, uint256 price, uint256 maxSupply);
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    constructor(address initialOwner) ERC721("NFTTicket", "NTKT") Ownable(initialOwner) {}
+    constructor(address initialOwner) ERC721("TicketNFT", "TIX") Ownable(initialOwner) {}
 
     // ─── Organizer functions (owner only) ─────────────────────────────────────
 
     /**
-     * @notice Mint `count` tickets for `eventId`, all sent to `recipient`.
-     * @return firstTokenId  The ID of the first token minted in this batch.
+     * @notice Set ticket price and max supply for an event.
+     */
+    function setEventParams(string calldata eventId, uint256 price, uint256 maxSupply) external onlyOwner {
+        eventPrice[eventId] = price;
+        eventMaxSupply[eventId] = maxSupply;
+        emit EventParamsSet(eventId, price, maxSupply);
+    }
+
+    /**
+     * @notice Purchase a ticket for an event.
+     */
+    function buyTicket(string calldata eventId) external payable {
+        uint256 price = eventPrice[eventId];
+        require(price > 0 || eventMaxSupply[eventId] > 0, "TicketNFT: event not registered");
+        require(msg.value >= price, "TicketNFT: insufficient funds");
+        require(eventMintedCount[eventId] < eventMaxSupply[eventId], "TicketNFT: event sold out");
+
+        uint256 tokenId = _nextTokenId++;
+        _safeMint(msg.sender, tokenId);
+        
+        tokenEvent[tokenId] = eventId;
+        eventMintedCount[eventId]++;
+
+        // Send funds to organizer (owner)
+        if (msg.value > 0) {
+            payable(owner()).transfer(msg.value);
+        }
+
+        emit TicketMinted(tokenId, eventId, msg.sender);
+    }
+
+    /**
+     * @notice Mint `count` tickets manually.
      */
     function mintBatch(
         string calldata eventId,
@@ -51,12 +92,15 @@ contract TicketNFT is ERC721, Ownable {
         address recipient
     ) external onlyOwner returns (uint256 firstTokenId) {
         require(count > 0 && count <= 200, "TicketNFT: count out of range");
+        require(eventMaxSupply[eventId] == 0 || eventMintedCount[eventId] + count <= eventMaxSupply[eventId], "TicketNFT: exceeds supply");
+        
         firstTokenId = _nextTokenId;
 
         for (uint256 i = 0; i < count; i++) {
             uint256 tokenId = _nextTokenId++;
             _safeMint(recipient, tokenId);
             tokenEvent[tokenId] = eventId;
+            eventMintedCount[eventId]++;
             emit TicketMinted(tokenId, eventId, recipient);
         }
     }
