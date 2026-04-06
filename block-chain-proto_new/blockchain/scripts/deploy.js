@@ -7,29 +7,19 @@ async function main() {
   console.log("Deploying TicketNFT with account:", deployer.address);
   console.log("Account balance:", (await hre.ethers.provider.getBalance(deployer.address)).toString());
 
-  const userAddress = "0x33497c9f49a5cffd78d6235c5cda5ba3083dd781";
-
-  // Fund the user's wallet with test ETH from the Hardhat node 
-  console.log("Funding user wallet with 100 ETH...");
-  const tx = await deployer.sendTransaction({
-    to: userAddress,
-    value: hre.ethers.parseEther("100.0")
-  });
-  await tx.wait();
-
-  // Deploy
+  // Deploy — the deployer IS the organizer
   const TicketNFT = await hre.ethers.getContractFactory("TicketNFT");
-  const contract = await TicketNFT.deploy(userAddress);
+  const contract = await TicketNFT.deploy(deployer.address);
   await contract.waitForDeployment();
 
   const contractAddress = await contract.getAddress();
   console.log("\n✅ TicketNFT deployed to:", contractAddress);
-  console.log("   Organizer (owner) address set to:", userAddress);
+  console.log("   Organizer (owner) address:", deployer.address);
 
-  // Write deployment info to a shared config file read by both frontend and backend
+  // Write deployment info
   const deploymentInfo = {
     contractAddress,
-    organizerAddress: userAddress,
+    organizerAddress: deployer.address,
     network: "localhost",
     chainId: 31337,
     deployedAt: new Date().toISOString()
@@ -42,7 +32,7 @@ async function main() {
     JSON.stringify(deploymentInfo, null, 2)
   );
 
-  // Copy ABI + deployment info to backend
+  // Copy ABI + deployment info to backend (root of backend/)
   const backendDir = path.join(__dirname, "..", "..", "backend");
   if (!fs.existsSync(backendDir)) fs.mkdirSync(backendDir, { recursive: true });
   const artifact = hre.artifacts.readArtifactSync("TicketNFT");
@@ -55,15 +45,11 @@ async function main() {
     JSON.stringify(deploymentInfo, null, 2)
   );
 
-  // Copy ABI + deployment info to frontend
-  const frontendDir = path.join(__dirname, "..", "..", "frontend");
-  if (!fs.existsSync(frontendDir)) fs.mkdirSync(frontendDir, { recursive: true });
+  // Copy deployment info to frontend/public/ (served as static asset by Vite)
+  const frontendPublicDir = path.join(__dirname, "..", "..", "frontend", "public");
+  if (!fs.existsSync(frontendPublicDir)) fs.mkdirSync(frontendPublicDir, { recursive: true });
   fs.writeFileSync(
-    path.join(frontendDir, "TicketNFT_abi.json"),
-    JSON.stringify(artifact.abi, null, 2)
-  );
-  fs.writeFileSync(
-    path.join(frontendDir, "deployment.json"),
+    path.join(frontendPublicDir, "deployment.json"),
     JSON.stringify(deploymentInfo, null, 2)
   );
 
@@ -71,13 +57,12 @@ async function main() {
   console.log("   blockchain/deployment.json");
   console.log("   backend/TicketNFT_abi.json");
   console.log("   backend/deployment.json");
-  console.log("   frontend/TicketNFT_abi.json");
-  console.log("   frontend/deployment.json");
+  console.log("   frontend/public/deployment.json");
   console.log("\n🚀 Next steps:");
-  console.log("   1. Start backend:  cd ../backend && uvicorn main:app --reload --port 8000");
-  console.log("   2. Open frontend:  frontend/index.html in browser");
+  console.log("   1. Start backend:  cd ../backend && npm run dev");
+  console.log("   2. Start frontend: cd ../frontend && npm run dev");
   console.log("   3. Connect MetaMask to http://127.0.0.1:8545 (Chain ID 31337)");
-  console.log("   4. Import organizer account private key into MetaMask");
+  console.log("   4. Import deployer account private key into MetaMask");
 }
 
 main().catch((error) => {
