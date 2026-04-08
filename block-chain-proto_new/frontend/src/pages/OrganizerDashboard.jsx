@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { connectWallet, checkConnection, getContract, loadDeployment } from '../utils/web3';
@@ -9,26 +9,28 @@ export default function OrganizerDashboard() {
   const { user, updateWallet } = useAuth();
   const { showToast } = useToast();
   const [walletAddr, setWalletAddr] = useState(null);
-  const [activeTab, setActiveTab] = useState('createEvent');
+  const [activeTab, setActiveTab] = useState('events');
   const [events, setEvents] = useState([]);
-
-  // Create Event form
-  const [eventForm, setEventForm] = useState({ name: '', date: '', venue: '', capacity: 100, price_eth: 0.01 });
-  const [createLoading, setCreateLoading] = useState(false);
-
-  // Mint form
+  const [registrations, setRegistrations] = useState([]);
+  const [selectedEvent, setSelectedEvent] = useState('');
   const [mintEventId, setMintEventId] = useState('');
   const [mintCount, setMintCount] = useState(10);
   const [mintLoading, setMintLoading] = useState(false);
-
-  // View tickets
-  const [viewEventId, setViewEventId] = useState('');
-  const [tickets, setTickets] = useState([]);
-  const [ticketsLoading, setTicketsLoading] = useState(false);
-
-  // Verifier
   const [verifierAddr, setVerifierAddr] = useState('');
   const [verifierLoading, setVerifierLoading] = useState(false);
+
+  const [blastEventId, setBlastEventId] = useState('');
+  const [blastTitle, setBlastTitle] = useState('');
+  const [blastMessage, setBlastMessage] = useState('');
+  const [blastLoading, setBlastLoading] = useState(false);
+
+  // Scanner State
+  const [mode, setMode] = useState('manual'); // 'manual' | 'scan'
+  const [manualInput, setManualInput] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [result, setResult] = useState(null);
+  const [scannerActive, setScannerActive] = useState(false);
+  const scannerRef = useRef(null);
 
   useEffect(() => {
     loadDeployment();
@@ -43,7 +45,7 @@ export default function OrganizerDashboard() {
     if (addr) {
       setWalletAddr(addr);
       if (!user.walletAddress) {
-        try { await updateWallet(addr); } catch (e) { /* ignore */ }
+        try { await updateWallet(addr); } catch (e) { }
       }
     }
   };
@@ -57,37 +59,41 @@ export default function OrganizerDashboard() {
     }
   };
 
-  // ── Create Event ──────────────────────────────────────────
-  const handleCreateEvent = async (e) => {
-    e.preventDefault();
-    if (!walletAddr) { showToast('Error', 'Connect your wallet first', true); return; }
-    setCreateLoading(true);
+  const loadRegistrations = async (eventId) => {
+    if (!eventId) return;
+    setSelectedEvent(eventId);
     try {
-      // 1. Save to backend
-      const { data: event } = await api.post('/events', eventForm);
-
-      // 2. Register on blockchain
-      const contract = getContract();
-      if (!contract) throw new Error('Contract not loaded');
-      const priceWei = ethers.parseEther(eventForm.price_eth.toString());
-      const tx = await contract.setEventParams(event.id, priceWei, eventForm.capacity);
-      await tx.wait();
-
-      showToast('Success', 'Event created and registered on-chain!');
-      setEventForm({ name: '', date: '', venue: '', capacity: 100, price_eth: 0.01 });
-      loadEvents();
-    } catch (err) {
-      showToast('Error', err.message || 'Failed to create event', true);
-    } finally {
-      setCreateLoading(false);
+      const { data } = await api.get(`/registrations/event/${eventId}`);
+      setRegistrations(data);
+    } catch (e) {
+      showToast('Error', 'Failed to load registrations', true);
     }
   };
 
-  // ── Mint Tickets ──────────────────────────────────────────
+  const handleApprove = async (regId) => {
+    try {
+      await api.put(`/registrations/${regId}/approve`);
+      showToast('Success', 'Registration approved');
+      loadRegistrations(selectedEvent);
+    } catch (e) {
+      showToast('Error', 'Failed to approve', true);
+    }
+  };
+
+  const handleDecline = async (regId) => {
+    try {
+      await api.put(`/registrations/${regId}/decline`);
+      showToast('Success', 'Registration declined');
+      loadRegistrations(selectedEvent);
+    } catch (e) {
+      showToast('Error', 'Failed to decline', true);
+    }
+  };
+
   const handleMint = async (e) => {
     e.preventDefault();
     if (!mintEventId) { showToast('Error', 'Select an event', true); return; }
-    if (!walletAddr) { showToast('Error', 'Connect your wallet first', true); return; }
+    if (!walletAddr) { showToast('Error', 'Connect wallet first', true); return; }
     setMintLoading(true);
     try {
       const contract = getContract();
@@ -96,223 +102,385 @@ export default function OrganizerDashboard() {
       await tx.wait();
       showToast('Success', `${mintCount} tickets minted!`);
     } catch (err) {
-      showToast('Tx Failed', err.message || 'Minting failed', true);
+      showToast('Error', err.message || 'Minting failed', true);
     } finally {
       setMintLoading(false);
     }
   };
 
-  // ── View Tickets ──────────────────────────────────────────
-  const handleViewTickets = async (eventId) => {
-    if (!eventId) return;
-    setViewEventId(eventId);
-    setTicketsLoading(true);
+  const verifyTicket = async (payload) => {
+    setVerifying(true);
+    setResult(null);
     try {
-      const { data } = await api.get(`/events/${eventId}/tickets`);
-      setTickets(data);
+      let parsed;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        throw new Error('Invalid QR payload format');
+      }
+
+      const { token_id, event_id } = parsed;
+      if (token_id === undefined || !event_id) {
+        throw new Error('Missing token_id or event_id');
+      }
+
+      const { data } = await api.post('/verify', { token_id, event_id });
+
+      if (data.status === 'INVALID') {
+        throw new Error(data.message || 'Ticket is invalid or already used');
+      }
+
+      setResult({
+        success: true,
+        tokenId: token_id,
+        eventId: event_id,
+        message: data.message || 'Ticket verified successfully!',
+      });
+      showToast('Verified ✅', 'Ticket is valid and has been marked as used');
     } catch (err) {
-      showToast('Error', 'Failed to load tickets', true);
-      setTickets([]);
+      setResult({
+        success: false,
+        message: err.response?.data?.message || err.message || 'Verification failed',
+      });
+      showToast('Failed ❌', err.response?.data?.message || err.message, true);
     } finally {
-      setTicketsLoading(false);
+      setVerifying(false);
     }
   };
 
-  // ── Add Verifier ──────────────────────────────────────────
-  const handleAddVerifier = async (e) => {
+  const handleManualVerify = () => {
+    if (!manualInput.trim()) return;
+    verifyTicket(manualInput.trim());
+  };
+
+  const startScanner = async () => {
+    setScannerActive(true);
+    try {
+      const { Html5Qrcode } = await import('html5-qrcode');
+      const scanner = new Html5Qrcode('qr-reader');
+      scannerRef.current = scanner;
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (text) => {
+          scanner.stop().catch(() => {});
+          setScannerActive(false);
+          verifyTicket(text);
+        },
+        () => {}
+      );
+    } catch (err) {
+      setScannerActive(false);
+      showToast('Error', 'Camera access denied or not available', true);
+    }
+  };
+
+  const stopScanner = () => {
+    if (scannerRef.current) {
+      scannerRef.current.stop().catch(() => {});
+      scannerRef.current = null;
+    }
+    setScannerActive(false);
+  };
+
+  const handleSendBlast = async (e) => {
     e.preventDefault();
-    if (!walletAddr) { showToast('Error', 'Connect your wallet first', true); return; }
-    setVerifierLoading(true);
+    if (!blastEventId) { showToast('Error', 'Select an event', true); return; }
+    setBlastLoading(true);
     try {
-      const contract = getContract();
-      if (!contract) throw new Error('Contract not loaded');
-      const tx = await contract.addVerifier(verifierAddr);
-      await tx.wait();
-      showToast('Success', `Verifier added: ${verifierAddr.substring(0, 8)}...`);
-      setVerifierAddr('');
+      const { data } = await api.post('/notifications/blast', {
+        eventId: blastEventId,
+        title: blastTitle,
+        message: blastMessage,
+      });
+      showToast('Blast Sent', data.message);
+      setBlastTitle('');
+      setBlastMessage('');
     } catch (err) {
-      showToast('Tx Failed', err.message || 'Failed to add verifier', true);
+      showToast('Error', err.response?.data?.message || 'Failed to send blast', true);
     } finally {
-      setVerifierLoading(false);
+      setBlastLoading(false);
     }
   };
 
-  // ── Guard ─────────────────────────────────────────────────
   if (!walletAddr) {
     return (
-      <div className="container" style={{ textAlign: 'center', padding: '4rem 0' }}>
-        <div className="card" style={{ maxWidth: 500, margin: '0 auto', padding: '3rem' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🦊</div>
-          <h2>MetaMask Required</h2>
-          <p style={{ color: 'var(--text-muted)', margin: '1rem 0 2rem' }}>
-            Please connect your organizer wallet to access this dashboard.
+      <div className="max-w-lg mx-auto px-4 py-20 text-center">
+        <div className="luma-card p-8">
+          <p className="text-4xl mb-4">🦊</p>
+          <h2 className="text-xl font-bold mb-2">Connect Your Wallet</h2>
+          <p className="text-sm text-[var(--color-text-tertiary)] mb-6">
+            Your MetaMask wallet is required to manage events on-chain.
           </p>
-          <button className="btn btn-primary" onClick={handleConnect}>Connect Wallet</button>
+          <button onClick={handleConnect} className="px-6 py-2.5 bg-[var(--color-accent)] text-[var(--color-text-inverse)] rounded-lg text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer border-0">
+            Connect Wallet
+          </button>
         </div>
       </div>
     );
   }
 
   const tabs = [
-    { id: 'createEvent', label: 'Create Event' },
-    { id: 'mintTickets', label: 'Mint Tickets' },
-    { id: 'viewTickets', label: 'View Tickets' },
-    { id: 'verifiers', label: 'Gate Verifiers' },
+    { id: 'events', label: 'My Events' },
+    { id: 'registrations', label: 'Registrations' },
+    { id: 'blasts', label: 'Notifications' },
+    { id: 'mint', label: 'Mint Tickets' },
+    { id: 'scanner', label: 'Scan Tickets' },
   ];
 
+  const inputClass = "w-full px-3 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text-primary)] outline-none transition-all focus:border-[var(--color-border-focus)] placeholder:text-[var(--color-text-tertiary)]";
+
   return (
-    <div className="container animate">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 animate-fade-in">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold tracking-tight">Host Dashboard</h1>
+        <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
+          Manage your events, registrations, and on-chain operations
+        </p>
+      </div>
+
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+      <div className="flex gap-1 mb-6 border-b border-[var(--color-border)]">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
-            style={{
-              background: 'none', border: 'none', color: activeTab === t.id ? 'var(--primary-accent)' : 'var(--text-muted)',
-              padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '1rem', fontWeight: 600,
-              borderBottom: activeTab === t.id ? '2px solid var(--primary-accent)' : '2px solid transparent',
-            }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer bg-transparent ${
+              activeTab === t.id
+                ? 'border-[var(--color-accent)] text-[var(--color-text-primary)]'
+                : 'border-transparent text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+            }`}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      {/* CREATE EVENT */}
-      {activeTab === 'createEvent' && (
-        <div className="card" style={{ maxWidth: 600, margin: '0 auto' }}>
-          <h2>Create New Event</h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Event metadata stored in MongoDB, params registered on-chain.</p>
-          <form onSubmit={handleCreateEvent}>
-            <div className="form-group">
-              <label>Event Name</label>
-              <input type="text" value={eventForm.name} onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })} required placeholder="e.g. Neon Festival 2026" />
+      {/* Events Tab */}
+      {activeTab === 'events' && (
+        <div className="space-y-3">
+          {events.length === 0 ? (
+            <div className="text-center py-16 border border-dashed border-[var(--color-border)] rounded-2xl">
+              <p className="text-sm text-[var(--color-text-tertiary)]">No events created yet</p>
             </div>
-            <div className="form-group">
-              <label>Date</label>
-              <input type="date" value={eventForm.date} onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })} required />
-            </div>
-            <div className="form-group">
-              <label>Venue</label>
-              <input type="text" value={eventForm.venue} onChange={(e) => setEventForm({ ...eventForm, venue: e.target.value })} required placeholder="Virtual Arena" />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div className="form-group">
-                <label>Total Capacity</label>
-                <input type="number" value={eventForm.capacity} onChange={(e) => setEventForm({ ...eventForm, capacity: parseInt(e.target.value) })} required min="1" />
+          ) : (
+            events.map((ev) => (
+              <div key={ev.id} className="luma-card p-4 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-[var(--color-text-tertiary)] uppercase tracking-wider">{ev.id}</span>
+                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{ev.name}</h3>
+                  <p className="text-xs text-[var(--color-text-tertiary)]">{ev.date || new Date(ev.startTime).toLocaleDateString()} · {ev.venue || 'Virtual'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    ev.status === 'published' ? 'bg-[var(--color-success-soft)] text-[var(--color-success)]'
+                    : ev.status === 'draft' ? 'bg-[var(--color-warning-soft)] text-[var(--color-warning)]'
+                    : 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
+                  }`}>
+                    {ev.status || 'published'}
+                  </span>
+                  <span className="text-xs text-[var(--color-text-tertiary)]">{ev.registrationCount || 0} guests</span>
+                </div>
               </div>
-              <div className="form-group">
-                <label>Ticket Price (ETH)</label>
-                <input type="number" value={eventForm.price_eth} onChange={(e) => setEventForm({ ...eventForm, price_eth: parseFloat(e.target.value) })} required min="0" step="0.001" />
-              </div>
-            </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={createLoading}>
-              {createLoading ? 'Processing...' : 'Create & Register Event (Requires Tx)'}
-            </button>
-          </form>
+            ))
+          )}
         </div>
       )}
 
-      {/* MINT TICKETS */}
-      {activeTab === 'mintTickets' && (
-        <div className="card" style={{ maxWidth: 600, margin: '0 auto' }}>
-          <h2>Mint Ticket NFTs</h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Mints ERC-721 tokens on the Hardhat blockchain.</p>
-          <form onSubmit={handleMint}>
-            <div className="form-group">
-              <label>Select Event</label>
-              <select value={mintEventId} onChange={(e) => setMintEventId(e.target.value)} required>
-                <option value="">-- Select Event --</option>
-                {events.map((ev) => (
-                  <option key={ev.id} value={ev.id}>{ev.name} ({ev.date})</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Number of Tickets to Mint</label>
-              <input type="number" value={mintCount} onChange={(e) => setMintCount(parseInt(e.target.value))} required min="1" max="100" />
-            </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={mintLoading}>
-              {mintLoading ? 'Minting...' : 'Mint Tickets (Requires Tx)'}
-            </button>
-          </form>
-        </div>
-      )}
+      {/* Registrations Tab */}
+      {activeTab === 'registrations' && (
+        <div>
+          <select value={selectedEvent} onChange={(e) => loadRegistrations(e.target.value)} className={`${inputClass} mb-4`}>
+            <option value="">Select an event</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>{ev.name}</option>
+            ))}
+          </select>
 
-      {/* VIEW TICKETS */}
-      {activeTab === 'viewTickets' && (
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2>Event Tickets Ledger</h2>
-            <select style={{ width: 250 }} value={viewEventId} onChange={(e) => handleViewTickets(e.target.value)}>
-              <option value="">-- Select Event --</option>
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>{ev.name} ({ev.date})</option>
+          {registrations.length === 0 ? (
+            <div className="text-center py-12 text-sm text-[var(--color-text-tertiary)]">
+              {selectedEvent ? 'No registrations yet' : 'Select an event to view registrations'}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {registrations.map((reg) => (
+                <div key={reg._id} className="luma-card p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[var(--color-bg-secondary)] flex items-center justify-center text-xs font-bold">
+                      {reg.user?.name?.[0] || '?'}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{reg.user?.name || 'Unknown'}</p>
+                      <p className="text-xs text-[var(--color-text-tertiary)]">{reg.user?.email}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      reg.status === 'approved' ? 'bg-[var(--color-success-soft)] text-[var(--color-success)]'
+                      : reg.status === 'pending' ? 'bg-[var(--color-warning-soft)] text-[var(--color-warning)]'
+                      : 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
+                    }`}>
+                      {reg.status}
+                    </span>
+                    {reg.status === 'pending' && (
+                      <>
+                        <button onClick={() => handleApprove(reg._id)} className="px-2.5 py-1 text-[10px] font-semibold bg-[var(--color-success)] text-white rounded-md cursor-pointer border-0 hover:opacity-90">
+                          Approve
+                        </button>
+                        <button onClick={() => handleDecline(reg._id)} className="px-2.5 py-1 text-[10px] font-semibold bg-[var(--color-danger)] text-white rounded-md cursor-pointer border-0 hover:opacity-90">
+                          Decline
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
               ))}
-            </select>
-          </div>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr><th>Token ID</th><th>Owner Address</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {ticketsLoading ? (
-                  <tr><td colSpan="3" style={{ textAlign: 'center' }}>Loading from blockchain...</td></tr>
-                ) : tickets.length === 0 ? (
-                  <tr><td colSpan="3" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                    {viewEventId ? 'No tickets minted yet' : 'Select an event to view tickets'}
-                  </td></tr>
-                ) : (
-                  tickets.map((t) => (
-                    <tr key={t.token_id}>
-                      <td>#{t.token_id}</td>
-                      <td><span style={{ fontFamily: 'monospace' }}>{t.owner}</span></td>
-                      <td>
-                        {t.is_used
-                          ? <span className="badge badge-used">USED</span>
-                          : <span className="badge badge-available">AVAILABLE</span>}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Blast Notifications Tab */}
+      {activeTab === 'blasts' && (
+        <div className="max-w-xl">
+          <div className="luma-card p-6">
+            <h2 className="text-lg font-semibold mb-1">Send Notification Blast</h2>
+            <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
+              Send an update to everyone registered for your event.
+            </p>
+            <form onSubmit={handleSendBlast} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Select Event</label>
+                <select value={blastEventId} onChange={(e) => setBlastEventId(e.target.value)} required className={inputClass}>
+                  <option value="">Select event</option>
+                  {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Notification Title</label>
+                <input type="text" value={blastTitle} onChange={(e) => setBlastTitle(e.target.value)} required placeholder="e.g. Venue Change" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Message</label>
+                <textarea 
+                  value={blastMessage} 
+                  onChange={(e) => setBlastMessage(e.target.value)} 
+                  required 
+                  placeholder="Enter your message here..." 
+                  className={inputClass} 
+                  rows={4}
+                />
+              </div>
+              <button type="submit" disabled={blastLoading} className="w-full bg-[var(--color-accent)] text-[var(--color-text-inverse)] font-medium py-2.5 rounded-lg text-sm hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer border-0 disabled:opacity-50">
+                {blastLoading ? 'Sending...' : 'Send Blast'}
+              </button>
+            </form>
           </div>
         </div>
       )}
 
-      {/* GATE VERIFIERS */}
-      {activeTab === 'verifiers' && (
-        <div className="card" style={{ maxWidth: 650, margin: '0 auto' }}>
-          <h2>Register Gate Verifier</h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Grant a wallet address permission to verify tickets and mark them as used on-chain.</p>
-          
-          {/* Instructions */}
-          <div style={{ background: 'rgba(124, 58, 237, 0.1)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '12px', padding: '1.5rem', marginBottom: '2rem' }}>
-            <h4 style={{ color: 'var(--primary-accent)', marginBottom: '0.75rem' }}>📋 How to Get a Verifier Wallet Address</h4>
-            <ol style={{ color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: '2', paddingLeft: '1.25rem' }}>
-              <li>The <strong style={{ color: '#fff' }}>gate verifier</strong> person must have <strong style={{ color: '#fff' }}>MetaMask</strong> installed in their browser.</li>
-              <li>They open MetaMask → click on the <strong style={{ color: '#fff' }}>account name</strong> at the top → it copies their wallet address (starts with <code style={{ color: 'var(--secondary-accent)' }}>0x...</code>).</li>
-              <li>They send you that address (e.g. via WhatsApp/email).</li>
-              <li>Paste it below and click <strong style={{ color: '#fff' }}>"Add Verifier"</strong> — this registers them <strong style={{ color: '#fff' }}>on the smart contract</strong>.</li>
-              <li>Now they can log in to NFTTix with the <strong style={{ color: '#fff' }}>Verifier</strong> role, connect their MetaMask, and use the <strong style={{ color: '#fff' }}>Gate Verifier Terminal</strong> to scan QR codes.</li>
-            </ol>
-            <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--text-muted)', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem' }}>
-              <strong>⚠️ Important:</strong> The verifier must use the <em>same wallet address</em> in MetaMask that you register here. Otherwise, on-chain verification will fail.
-            </p>
+      {/* Mint Tab */}
+      {activeTab === 'mint' && (
+        <div className="max-w-lg">
+          <div className="luma-card p-6">
+            <h2 className="text-lg font-semibold mb-1">Mint Ticket NFTs</h2>
+            <p className="text-xs text-[var(--color-text-tertiary)] mb-4">Mint ERC-721 tokens on the blockchain</p>
+            <form onSubmit={handleMint} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Event</label>
+                <select value={mintEventId} onChange={(e) => setMintEventId(e.target.value)} required className={inputClass}>
+                  <option value="">Select event</option>
+                  {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Quantity</label>
+                <input type="number" value={mintCount} onChange={(e) => setMintCount(parseInt(e.target.value))} min="1" max="100" className={inputClass} />
+              </div>
+              <button type="submit" disabled={mintLoading} className="w-full bg-[var(--color-accent)] text-[var(--color-text-inverse)] font-medium py-2.5 rounded-lg text-sm hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer border-0 disabled:opacity-50">
+                {mintLoading ? 'Minting...' : 'Mint Tickets'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Scanner Tab */}
+      {activeTab === 'scanner' && (
+        <div className="max-w-xl mx-auto">
+          <div className="text-center mb-6">
+            <h2 className="text-lg font-semibold mb-1">Gate Scanner</h2>
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">Scan or paste QR codes to verify tickets on-chain</p>
           </div>
 
-          <form onSubmit={handleAddVerifier}>
-            <div className="form-group">
-              <label>Verifier Wallet Address</label>
-              <input type="text" value={verifierAddr} onChange={(e) => setVerifierAddr(e.target.value)} required placeholder="0x... (paste the verifier's MetaMask address)" />
-            </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={verifierLoading}>
-              {verifierLoading ? 'Adding...' : 'Add Verifier (Requires Tx)'}
+          <div className="flex gap-1 bg-[var(--color-bg-secondary)] rounded-lg p-1 mb-6">
+            <button
+              onClick={() => { setMode('scan'); if (!scannerActive) startScanner(); }}
+              className={`flex-1 py-2 rounded-md text-sm font-medium text-center transition-colors cursor-pointer border-0 ${
+                mode === 'scan' ? 'bg-[var(--color-surface)] shadow-xs text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)]'
+              }`}
+            >
+              📷 Scan QR
             </button>
-          </form>
+            <button
+              onClick={() => { setMode('manual'); stopScanner(); }}
+              className={`flex-1 py-2 rounded-md text-sm font-medium text-center transition-colors cursor-pointer border-0 ${
+                mode === 'manual' ? 'bg-[var(--color-surface)] shadow-xs text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)]'
+              }`}
+            >
+              ⌨️ Manual
+            </button>
+          </div>
+
+          {mode === 'scan' && (
+            <div className="luma-card p-4 mb-6">
+              <div id="qr-reader" className="rounded-xl overflow-hidden bg-[var(--color-bg)]" style={{ minHeight: 300 }} />
+              {scannerActive && (
+                <button onClick={stopScanner} className="mt-3 w-full py-2 border border-[var(--color-border)] rounded-lg text-sm font-medium text-[var(--color-text-secondary)] cursor-pointer bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]">
+                  Stop Scanner
+                </button>
+              )}
+            </div>
+          )}
+
+          {mode === 'manual' && (
+            <div className="luma-card p-5 mb-6">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">QR Payload</label>
+              <textarea
+                value={manualInput}
+                onChange={(e) => setManualInput(e.target.value)}
+                placeholder='{"token_id": "ticket_id_here", "event_id": "EVT-001"}'
+                rows={3}
+                className="w-full px-3 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm font-mono text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-focus)] resize-none placeholder:text-[var(--color-text-tertiary)]"
+              />
+              <button
+                onClick={handleManualVerify}
+                disabled={verifying || !manualInput.trim()}
+                className="mt-3 w-full bg-[var(--color-accent)] text-[var(--color-text-inverse)] font-medium py-2.5 rounded-lg text-sm cursor-pointer border-0 hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {verifying ? 'Verifying...' : 'Verify Ticket'}
+              </button>
+            </div>
+          )}
+
+          {result && (
+            <div className={`luma-card p-5 animate-fade-in ${
+              result.success ? 'border-[var(--color-success)]' : 'border-[var(--color-danger)]'
+            }`}>
+              <div className="text-center">
+                <p className="text-4xl mb-3">{result.success ? '✅' : '❌'}</p>
+                <h3 className={`text-lg font-semibold mb-1 ${result.success ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}`}>
+                  {result.success ? 'Ticket Verified' : 'Verification Failed'}
+                </h3>
+                <p className="text-sm text-[var(--color-text-tertiary)]">{result.message}</p>
+                {result.success && (
+                  <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+                    <p className="text-xs text-[var(--color-text-tertiary)]">Token #{result.tokenId} · {result.eventId}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

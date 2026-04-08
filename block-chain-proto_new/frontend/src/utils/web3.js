@@ -88,3 +88,8 @@ export function getContract() {
 export function getSigner() {
   return signer;
 }
+
+export async function signMessage(message) {
+  if (!signer) throw new Error('Wallet not connected');
+  return await signer.signMessage(message);
+}

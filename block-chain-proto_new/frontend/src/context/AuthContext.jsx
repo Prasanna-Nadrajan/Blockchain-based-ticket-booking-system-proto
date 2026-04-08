@@ -48,6 +48,15 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  const loginWithWallet = async (address, signature, message) => {
+    const { data } = await api.post('/auth/wallet-login', { address, signature, message });
+    localStorage.setItem('nfttix_token', data.token);
+    localStorage.setItem('nfttix_user', JSON.stringify(data.user));
+    setToken(data.token);
+    setUser(data.user);
+    return data.user;
+  };
+
   const logout = () => {
     localStorage.removeItem('nfttix_token');
     localStorage.removeItem('nfttix_user');
@@ -61,8 +70,14 @@ export function AuthProvider({ children }) {
     localStorage.setItem('nfttix_user', JSON.stringify(data.user));
   };
 
+  const refreshUser = async () => {
+    const { data } = await api.get('/auth/me');
+    setUser(data.user);
+    localStorage.setItem('nfttix_user', JSON.stringify(data.user));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, updateWallet }}>
+    <AuthContext.Provider value={{ user, token, loading, login, loginWithWallet, register, logout, updateWallet, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

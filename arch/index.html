@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlockTicket - Blockchain-Based Ticket Booking System</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <meta name="description" content="BlockTicket - Immutable, Verified, Tamper-Proof Event Ticketing on the Blockchain">
+    <meta name="keywords" content="blockchain, NFT, tickets, crypto, Ethereum, Polygon">
+    <meta name="theme-color" content="#667eea">
+</head>
+<body>
+    <header>
+        <h1><i class="fas fa-ticket-alt"></i> BlockTicket</h1>
+        <p><strong>Immutable · Verified · Tamper-Proof Event Ticketing on the Blockchain</strong></p>
+        <p style="font-size: 0.9rem; margin-top: 1rem;">Presented by Prasanna Nadrajan, Ruban Kumar, Mahesh, Luqman</p>
+        <p style="font-size: 0.85rem; color: #95a5a6;">Rajalakshmi Engineering College · 2026 · Team Neural Nexus</p>
+    </header>
+
+    <section id="problem">
+        <h2><i class="fas fa-exclamation-triangle"></i> The 'Fake Ticket' Crisis</h2>
+        <div class="stats">
+            <div class="stat">
+                <h3>$12B+</h3>
+                <p>Annual revenue lost to ticket fraud globally</p>
+            </div>
+            <div class="stat">
+                <h3>~30%</h3>
+                <p>Of resold tickets are counterfeit or invalid</p>
+            </div>
+            <div class="stat">
+                <h3>68%</h3>
+                <p>Fans report distrust in secondary markets</p>
+            </div>
+            <div class="stat">
+                <h3>4.6M</h3>
+                <p>Fraudulent tickets sold in the last 3 years</p>
+            </div>
+        </div>
+        <p style="font-size: 1.1rem; color: #7f8c8d; margin: 2rem 0;"><strong>The ticketing industry faces severe challenges:</strong></p>
+        <ul>
+            <li><i class="fas fa-print"></i> <strong>Counterfeiting & Scalping:</strong> High-resolution printers replicate barcodes in minutes — standard scanners cannot detect fakes</li>
+            <li><i class="fas fa-database"></i> <strong>Centralized System Failures:</strong> Siloed databases provide zero transparency into ticket transfer history</li>
+            <li><i class="fas fa-robot"></i> <strong>Bot Networks:</strong> Sweep inventory within seconds of release, inflating resale prices by 300–1000%</li>
+            <li><i class="fas fa-lock"></i> <strong>No On-Chain Provenance:</strong> Screenshot-based QR codes allow unlimited copies to be shared and reused</li>
+            <li><i class="fas fa-minus-circle"></i> <strong>Single Point of Failure:</strong> If the ticketing platform's DB is breached, all tickets are compromised</li>
+        </ul>
+        <p style="text-align: center; font-size: 1.1rem; color: #e74c3c; font-weight: bold; margin-top: 2rem;">The ticketing industry demands a trustless, decentralized solution — the status quo is broken.</p>
+    </section>
+
+    <section id="solution">
+        <h2><i class="fas fa-lightbulb"></i> The Solution — Why Blockchain?</h2>
+        <div class="comparison">
+            <div class="old-way">
+                <h3>❌ Centralized (Old Way)</h3>
+                <ul>
+                    <li>Single corporate database</li>
+                    <li>Static barcodes easily copied</li>
+                    <li>Zero resale transparency</li>
+                    <li>Buyer identity unverifiable</li>
+                </ul>
+            </div>
+            <div class="new-way">
+                <h3>✅ BlockTicket (New Way)</h3>
+                <ul>
+                    <li>ERC-721 NFTs on Ethereum/Polygon</li>
+                    <li>Time-based cryptographic QR codes</li>
+                    <li>On-chain resale caps & creator royalties</li>
+                    <li>Wallet-based identity</li>
+                </ul>
+            </div>
+        </div>
+        <p>Trustless, transparent, programmable, and censorship-resistant by design.</p>
+    </section>
+
+    <section id="objectives">
+        <h2><i class="fas fa-bullseye"></i> Core Objectives</h2>
+        <div class="objectives-grid">
+            <div class="objective">
+                <h3>01 NFT Ticket Minting</h3>
+                <p>ERC-721 Standard on Polygon PoS. Metadata on IPFS. Immutable provenance.</p>
+            </div>
+            <div class="objective">
+                <h3>02 Smart Contract Price Caps</h3>
+                <p>Resale cap ≤ 150% face value. Creator royalty 5–15%.</p>
+            </div>
+            <div class="objective">
+                <h3>03 Dynamic QR Codes</h3>
+                <p>TOTP-style QR generated every 60 seconds using HMAC-SHA256.</p>
+            </div>
+            <div class="objective">
+                <h3>04 Anti-Scalping Logic</h3>
+                <p>Transfer cooldown, blacklist mechanism, escrow funds.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="architecture">
+        <h2><i class="fas fa-cogs"></i> Industry Standard System Architecture</h2>
+        <div class="mermaid-container">
+            <div class="mermaid">
+graph TD
+    A[Client Layer: Organizer Dash, Mobile App, Gate Scanner] --> B[Application API: Minting Engine, AI Fraud API, Edge API Gateway]
+    B --> C[Data & Bridge: IPFS Gateway, Redis + Postgres, Smart Contracts]
+    C --> D[On-Chain Web3: Web3 Relayer, Polygon Network]
+            </div>
+        </div>
+        <p>Decentralized file storage, hybrid state cluster, L2 PoS blockchain.</p>
+    </section>
+
+    <section id="features">
+        <h2><i class="fas fa-star"></i> Key Features</h2>
+        <div class="features-grid">
+            <div class="feature">
+                <h3><i class="fas fa-crown"></i> Royalty Enforcement</h3>
+                <p>On-chain royalty hook. Configurable rate. Compatible with ERC-2981.</p>
+            </div>
+            <div class="feature">
+                <h3><i class="fas fa-user-lock"></i> One-Ticket · One-Owner Logic</h3>
+                <p>Transfer lock after gate scan. Wallet-bound ownership.</p>
+            </div>
+            <div class="feature">
+                <h3><i class="fas fa-shield-alt"></i> Security Measures</h3>
+                <p>60-sec QR rotation, one-time nonce, cryptographic verification.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="impact">
+        <h2><i class="fas fa-chart-line"></i> Expected Impact</h2>
+        <div class="impact-grid">
+            <div class="impact">
+                <h3>For Event Organizers</h3>
+                <ul>
+                    <li>Guaranteed royalty income</li>
+                    <li>Full visibility into resale</li>
+                    <li>Reduced fraud costs</li>
+                </ul>
+            </div>
+            <div class="impact">
+                <h3>For Attendees</h3>
+                <ul>
+                    <li>100% authentic tickets</li>
+                    <li>Protected from overpaying</li>
+                    <li>Seamless wallet-based entry</li>
+                </ul>
+            </div>
+        </div>
+        <div class="metrics">
+            <div class="metric">~100% Counterfeit Elimination</div>
+            <div class="metric">5–15% Organizer Royalty Per Resale</div>
+            <div class="metric"><150% Resale Price Cap</div>
+            <div class="metric">60 sec QR Validity Window</div>
+        </div>
+    </section>
+
+    <section id="future">
+        <h2><i class="fas fa-brain"></i> Future Scope — AI Integration</h2>
+        <div class="ai-features">
+            <div class="ai-feature">
+                <h3>AI-01 Anti-Scalping Bot Detection</h3>
+                <p>Random Forest + LSTM. Detects bot patterns, on-chain blacklist.</p>
+            </div>
+            <div class="ai-feature">
+                <h3>AI-02 Dynamic Demand Pricing Oracle</h3>
+                <p>XGBoost + ARIMA. Predicts fair resale price.</p>
+            </div>
+            <div class="ai-feature">
+                <h3>AI-03 Fraud Anomaly Scoring</h3>
+                <p>Isolation Forest + GNN. Risk score per wallet.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="conclusion">
+        <h2><i class="fas fa-check-circle"></i> Conclusion</h2>
+        <p>BlockTicket — The Future of Trust in Events</p>
+        <ul>
+            <li>ERC-721 NFT tickets eliminate counterfeiting</li>
+            <li>Time-based QR codes make screenshot fraud impossible</li>
+            <li>Smart contract royalties restore revenue control</li>
+            <li>Integrated ML pipelines neutralize bot scalping</li>
+            <li>Fully decentralized — no single point of failure</li>
+        </ul>
+    </section>
+
+    <footer>
+        <h3>Connect With Us</h3>
+        <p>Team: Neural Nexus</p>
+        <p>Members: Prasanna Nadrajan, Ruban Kumar, Mahesh, Luqman</p>
+        <p><i class="fab fa-github"></i> <a href="https://github.com/PrasannaNadrajan/Blockchain-based-ticket-booking-system-proto" target="_blank">GitHub Repository</a></p>
+        <p>Thank You · Q&A</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -55,29 +55,48 @@ router.post('/events/:eventId/send-receipt', auth, async (req, res) => {
     }
 
     const c = getContract();
-    if (!c) {
-      return res.status(500).json({ message: 'Smart contract not configured. Please deploy the contract first.' });
-    }
-
-    // Find user's most recent ticket for this event
-    const totalMinted = Number(await c.totalMinted());
+    
     let myTokenId = null;
 
-    for (let i = totalMinted - 1; i >= 0; i--) {
+    if (c) {
+      // Find user's most recent ticket for this event
       try {
-        const owner = (await c.ownerOf(i)).toLowerCase();
-        const tokenEvent = await c.tokenEvent(i);
-        if (owner === wallet && tokenEvent === eventId) {
-          myTokenId = i;
-          break;
+        const totalMinted = Number(await c.totalMinted());
+        for (let i = totalMinted - 1; i >= 0; i--) {
+          try {
+            const owner = (await c.ownerOf(i)).toLowerCase();
+            const tokenEvent = await c.tokenEvent(i);
+            if (owner === wallet && tokenEvent === eventId) {
+              myTokenId = i;
+              break;
+            }
+          } catch (e) {
+            continue;
+          }
         }
-      } catch (e) {
-        continue;
+      } catch (err) {
+        console.warn("Could not fetch from smart contract:", err.message);
       }
     }
 
-    if (myTokenId === null) {
-      return res.status(404).json({ message: 'No ticket found for this wallet and event.' });
+    let ticketReference = myTokenId !== null ? myTokenId : null;
+
+    if (ticketReference === null) {
+      // Fallback: Check internal database Registration
+      const Registration = require('../models/Registration');
+      const reg = await Registration.findOne({
+        event: (await Event.findOne({ eventId }))._id,
+        user: req.user._id,
+        status: 'approved'
+      });
+
+      if (reg) {
+        ticketReference = reg._id.toString(); // Use database registration ID
+      }
+    }
+
+    if (ticketReference === null) {
+      return res.status(404).json({ message: 'No ticket or approved registration found for this user.' });
     }
 
     // Get event details
@@ -87,7 +106,7 @@ router.post('/events/:eventId/send-receipt', auth, async (req, res) => {
     const eventVenue = ev ? ev.venue : 'N/A';
 
     // Generate QR
-    const payload = JSON.stringify({ token_id: myTokenId, event_id: eventId });
+    const payload = JSON.stringify({ token_id: ticketReference, event_id: eventId });
     const qrBuffer = await QRCode.toBuffer(payload, { width: 400, margin: 3 });
 
     // Build a nice HTML email with event details
@@ -107,7 +126,7 @@ router.post('/events/:eventId/send-receipt', auth, async (req, res) => {
               <tr><td style="color: #9ca3af; padding: 4px 0;">Event</td><td style="padding: 4px 0; font-weight: 600;">${eventName}</td></tr>
               <tr><td style="color: #9ca3af; padding: 4px 0;">Date</td><td style="padding: 4px 0;">${eventDate}</td></tr>
               <tr><td style="color: #9ca3af; padding: 4px 0;">Venue</td><td style="padding: 4px 0;">${eventVenue}</td></tr>
-              <tr><td style="color: #9ca3af; padding: 4px 0;">Ticket ID</td><td style="padding: 4px 0; font-family: monospace; color: #06b6d4;">#${myTokenId}</td></tr>
+              <tr><td style="color: #9ca3af; padding: 4px 0;">Ticket ID</td><td style="padding: 4px 0; font-family: monospace; color: #06b6d4;">#${ticketReference}</td></tr>
             </table>
           </div>
 
@@ -135,10 +154,10 @@ router.post('/events/:eventId/send-receipt', auth, async (req, res) => {
       to: email,
       subject: `🎫 Your Ticket for ${eventName} — NFTTix`,
       html: htmlBody,
-      text: `Hello!\n\nThank you for registering for ${eventName}.\n\nEvent Details:\nName: ${eventName}\nDate: ${eventDate}\nVenue: ${eventVenue}\nTicket ID: #${myTokenId}\n\nPlease find your entry QR code attached to this email. Show this at the gate.\n\nEnjoy the event!\nThe NFTTix Team`,
+      text: `Hello!\n\nThank you for registering for ${eventName}.\n\nEvent Details:\nName: ${eventName}\nDate: ${eventDate}\nVenue: ${eventVenue}\nTicket ID: #${ticketReference}\n\nPlease find your entry QR code attached to this email. Show this at the gate.\n\nEnjoy the event!\nThe NFTTix Team`,
       attachments: [
         {
-          filename: `ticket_${myTokenId}.png`,
+          filename: `ticket_${ticketReference}.png`,
           content: qrBuffer,
           contentType: 'image/png',
           cid: 'ticket_qr',
@@ -146,8 +165,8 @@ router.post('/events/:eventId/send-receipt', auth, async (req, res) => {
       ],
     });
 
-    console.log(`✅ Email receipt sent to ${email} for event ${eventName} (token #${myTokenId})`);
-    res.json({ message: 'Receipt processed successfully', token_id: myTokenId });
+    console.log(`✅ Email receipt sent to ${email} for event ${eventName} (token #${ticketReference})`);
+    res.json({ message: 'Receipt processed successfully', token_id: ticketReference });
   } catch (err) {
     console.error('Email receipt error:', err);
     res.status(500).json({ message: `Email send failed: ${err.message}` });

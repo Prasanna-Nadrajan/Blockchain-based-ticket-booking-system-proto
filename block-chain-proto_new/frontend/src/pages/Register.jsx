@@ -9,7 +9,6 @@ export default function Register() {
     password: '',
     confirmPassword: '',
     role: 'user',
-    walletAddress: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,7 +27,6 @@ export default function Register() {
       setError('Passwords do not match.');
       return;
     }
-
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
@@ -36,141 +34,97 @@ export default function Register() {
 
     setLoading(true);
     try {
-      await register(form.name, form.email, form.password, form.role, form.walletAddress);
+      await register(form.name, form.email, form.password, form.role, '');
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(err.response?.data?.message || 'Registration failed.');
     } finally {
       setLoading(false);
     }
   };
 
+  const inputClass = "w-full px-3 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text-primary)] outline-none transition-all focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[var(--color-accent)]/10 placeholder:text-[var(--color-text-tertiary)]";
+
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        padding: '2rem',
-      }}
-    >
-      <div className="card animate" style={{ maxWidth: 480, width: '100%' }}>
-        <h2 style={{ textAlign: 'center', marginBottom: '0.5rem', fontSize: '2rem' }}>
-          Join <span className="gradient-text">NFTTix</span>
-        </h2>
-        <p
-          style={{
-            color: 'var(--text-muted)',
-            marginBottom: '2rem',
-            fontSize: '0.875rem',
-            textAlign: 'center',
-          }}
-        >
-          Create your account to get started
-        </p>
+    <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)] px-4 py-12">
+      <div className="w-full max-w-sm animate-fade-in">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Create your <span className="gradient-text">NFTTix</span> account
+          </h1>
+          <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
+            Join the community of event creators
+          </p>
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Full Name</label>
-            <input
-              type="text"
-              name="name"
-              value={form.name}
-              onChange={handleChange}
-              required
-              placeholder="John Doe"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Email</label>
-            <input
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={handleChange}
-              required
-              placeholder="you@example.com"
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                required
-                placeholder="••••••••"
-                minLength={6}
-              />
+        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-xs">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Full Name</label>
+              <input id="register-name" type="text" name="name" value={form.name} onChange={handleChange} required placeholder="John Doe" className={inputClass} />
             </div>
-            <div className="form-group">
-              <label>Confirm Password</label>
-              <input
-                type="password"
-                name="confirmPassword"
-                value={form.confirmPassword}
-                onChange={handleChange}
-                required
-                placeholder="••••••••"
-              />
+
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Email address</label>
+              <input id="register-email" type="email" name="email" value={form.email} onChange={handleChange} required placeholder="you@example.com" className={inputClass} />
             </div>
-          </div>
 
-          <div className="form-group">
-            <label>Select Your Role</label>
-            <select name="role" value={form.role} onChange={handleChange}>
-              <option value="user">🎫 Ticket Holder (User)</option>
-              <option value="organizer">🏟️ Event Organizer</option>
-              <option value="verifier">🔍 Gate Verifier</option>
-            </select>
-          </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Password</label>
+                <input id="register-password" type="password" name="password" value={form.password} onChange={handleChange} required placeholder="••••••••" minLength={6} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">Confirm</label>
+                <input id="register-confirm" type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} required placeholder="••••••••" className={inputClass} />
+              </div>
+            </div>
 
-          <div className="form-group">
-            <label>
-              Wallet Address{' '}
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>(optional — can connect later)</span>
-            </label>
-            <input
-              type="text"
-              name="walletAddress"
-              value={form.walletAddress}
-              onChange={handleChange}
-              placeholder="0x..."
-            />
-          </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">I want to</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: 'user', label: 'Attend Events', icon: '🎫' },
+                  { value: 'organizer', label: 'Host Events', icon: '🎪' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setForm({ ...form, role: opt.value })}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
+                      form.role === opt.value
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-text-primary)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-hover)]'
+                    }`}
+                  >
+                    <span>{opt.icon}</span>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          {error && (
-            <p style={{ color: 'var(--danger)', fontSize: '0.875rem', marginBottom: '1rem' }}>
-              {error}
-            </p>
-          )}
+            {error && (
+              <div className="bg-[var(--color-danger-soft)] text-[var(--color-danger)] text-xs font-medium px-3 py-2 rounded-lg">
+                {error}
+              </div>
+            )}
 
-          <button
-            type="submit"
-            className="btn btn-primary"
-            style={{ width: '100%', padding: '0.875rem', fontSize: '1rem', marginTop: '0.5rem' }}
-            disabled={loading}
-          >
-            {loading ? 'Creating Account...' : 'Create Account'}
-          </button>
-        </form>
+            <button
+              id="register-submit"
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[var(--color-accent)] text-[var(--color-text-inverse)] font-medium py-2.5 rounded-lg text-sm hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Creating account...' : 'Create Account'}
+            </button>
+          </form>
+        </div>
 
-        <p
-          style={{
-            marginTop: '1.5rem',
-            color: 'var(--text-muted)',
-            fontSize: '0.875rem',
-            textAlign: 'center',
-          }}
-        >
+        <p className="text-center text-xs text-[var(--color-text-tertiary)] mt-6">
           Already have an account?{' '}
-          <Link to="/login" style={{ color: 'var(--primary-accent)', textDecoration: 'none' }}>
-            Login here
+          <Link to="/login" className="text-[var(--color-text-primary)] font-medium hover:underline no-underline">
+            Sign in
           </Link>
         </p>
       </div>
